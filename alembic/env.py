@@ -1,9 +1,8 @@
 import asyncio
 from logging.config import fileConfig
 
-from sqlalchemy import pool
+from sqlalchemy import create_engine, pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from alembic import context
 
@@ -19,6 +18,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+engine = create_engine(settings.database_url, poolclass=pool.NullPool)
 
 
 def run_migrations_offline() -> None:
@@ -37,20 +37,12 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 def run_migrations_online() -> None:
-    connectable = context.config.attributes.get("connection", None)
-
+    connectable = context.config.attributes.get("connection")
     if connectable is None:
-        connectable = AsyncEngine(Base.metadata.bind) if isinstance(Base.metadata.bind, AsyncEngine) else Base.metadata.bind
+                connectable = engine
 
-    if isinstance(connectable, AsyncEngine):
-        async def async_run() -> None:
-            async with connectable.connect() as connection:
-                await connection.run_sync(do_run_migrations)
-
-        asyncio.run(async_run())
-    else:
-        with connectable.connect() as connection:
-            do_run_migrations(connection)
+    with connectable.connect() as connection:
+        do_run_migrations(connection)
 
 
 if context.is_offline_mode():
