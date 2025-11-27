@@ -75,3 +75,4 @@ Uploads are saved under `APP_MEDIA_ROOT` (defaults to `backend/storage`). Each o
 - Share the API base URL + `X-API-Key` with each frontend so we can wire their data sources to these endpoints.
 - Extend the routers with any app-specific logic (e.g., CCTV streaming controls) once the core plumbing is running.
 
+## this app is under dev
