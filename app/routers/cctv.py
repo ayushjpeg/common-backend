@@ -39,7 +39,7 @@ async def upload_recording(stream_id: str, file: UploadFile = File(...), duratio
         owner_id=stream_id,
         file_path=str(dest_path),
         mime_type=file.content_type,
-        metadata={"filename": file.filename},
+        metadata_json={"filename": file.filename},
     )
     db.add(media)
     db.flush()

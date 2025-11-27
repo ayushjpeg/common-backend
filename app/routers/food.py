@@ -40,7 +40,7 @@ async def upload_meal_image(meal_id: str, file: UploadFile = File(...), db: Sess
         owner_id=meal_id,
         file_path=str(dest_path),
         mime_type=file.content_type,
-        metadata={"filename": file.filename},
+        metadata_json={"filename": file.filename},
     )
     db.add(media)
     db.flush()

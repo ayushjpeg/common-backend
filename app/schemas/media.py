@@ -10,7 +10,7 @@ class MediaAssetRead(BaseModel):
     owner_id: str | None
     file_path: str
     mime_type: str | None
-    metadata: dict[str, Any]
+    metadata_json: dict[str, Any]
     created_at: datetime
 
     class Config:

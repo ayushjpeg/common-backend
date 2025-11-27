@@ -14,5 +14,5 @@ class MediaAsset(Base):
     owner_id = Column(String(64), nullable=True)
     file_path = Column(String(512), nullable=False)
     mime_type = Column(String(128), nullable=True)
-    metadata = Column(JSON, default=dict)
+    metadata_json = Column(JSON, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
