@@ -1,0 +1,46 @@
+name: Deploy Unified Backend
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t common-backend:latest .
+
+      - name: Stop old container
+        run: docker rm -f common-backend || true
+
+      - name: Run migrations
+        run: |
+          APP_DATABASE_URL='${{ secrets.APP_DATABASE_URL }}'
+          docker run --rm \
+            -e APP_DATABASE_URL="$APP_DATABASE_URL" \
+            common-backend:latest alembic upgrade head
+
+      - name: Run new container
+        run: |
+          APP_DATABASE_URL='${{ secrets.APP_DATABASE_URL }}'
+          APP_API_KEY='${{ secrets.APP_API_KEY }}'
+          APP_ALLOWED_ORIGINS='${{ secrets.APP_ALLOWED_ORIGINS }}'
+          APP_MEDIA_ROOT='${{ secrets.APP_MEDIA_ROOT }}'
+          TZ='Asia/Kolkata'
+          : "${APP_MEDIA_ROOT:=/srv/common-backend/media}"
+          : "${APP_ALLOWED_ORIGINS:='[\"http://localhost:8006\"]'}"
+          docker run -d --restart unless-stopped \
+            --name common-backend \
+            -p 8007:8007 \
+            -e APP_DATABASE_URL="$APP_DATABASE_URL" \
+            -e APP_API_KEY="$APP_API_KEY" \
+            -e APP_ALLOWED_ORIGINS="$APP_ALLOWED_ORIGINS" \
+            -e APP_MEDIA_ROOT="$APP_MEDIA_ROOT" \
+            -e TZ="$TZ" \
+            -v "$APP_MEDIA_ROOT":"$APP_MEDIA_ROOT" \
+            common-backend:latest
