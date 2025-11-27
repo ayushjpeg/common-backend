@@ -21,7 +21,7 @@ jobs:
       - name: Run migrations
         run: |
           APP_DATABASE_URL='${{ secrets.APP_DATABASE_URL }}'
-          docker run --rm \
+          docker run --rm -w /app \
             -e APP_DATABASE_URL="$APP_DATABASE_URL" \
             common-backend:latest alembic upgrade head
 
