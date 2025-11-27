@@ -21,7 +21,7 @@ jobs:
       - name: Run migrations
         run: |
           APP_DATABASE_URL='${{ secrets.APP_DATABASE_URL }}'
-          docker run --rm -w /app \
+          docker run --rm -w /app --add-host host.docker.internal:host-gateway \
             -e APP_DATABASE_URL="$APP_DATABASE_URL" \
             common-backend:latest alembic upgrade head
 
@@ -34,7 +34,7 @@ jobs:
           TZ='Asia/Kolkata'
           : "${APP_MEDIA_ROOT:=/srv/common-backend/media}"
           : "${APP_ALLOWED_ORIGINS:='[\"http://localhost:8006\"]'}"
-          docker run -d --restart unless-stopped \
+          docker run -d --restart unless-stopped --add-host host.docker.internal:host-gateway \
             --name common-backend \
             -p 8007:8007 \
             -e APP_DATABASE_URL="$APP_DATABASE_URL" \

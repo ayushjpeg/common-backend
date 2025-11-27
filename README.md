@@ -63,6 +63,8 @@ The API will now respond at `http://localhost:8007/api/...`.
 
 > **Note:** Alembic migrations will create the database *schema*, but PostgreSQL itself must already be running. Create the `task_ops` database (or update `APP_DATABASE_URL`) before running `alembic upgrade head`.
 
+When deploying through GitHub Actions on a self-hosted runner, set `APP_DATABASE_URL` to use `host.docker.internal` (e.g., `postgresql+psycopg2://task_user:task_password@host.docker.internal:5432/task_ops`). The workflow adds that host mapping so containers can reach the host OS database.
+
 ## Media storage
 
 Uploads are saved under `APP_MEDIA_ROOT` (defaults to `backend/storage`). Each owner type (food, cctv, etc.) gets its own subfolder. In production, point `APP_MEDIA_ROOT` to a persistent path mounted from your Linux server or swap the implementation for S3/MinIO.
