@@ -72,3 +72,5 @@ Uploads are saved under `APP_MEDIA_ROOT` (defaults to `backend/storage`). Each o
 - Host this backend + PostgreSQL on your Linux server (Docker or bare-metal) and expose it with HTTPS. A ready-made workflow for your self-hosted runner lives at `.github/workflows/deploy.yml`.
 - Share the API base URL + `X-API-Key` with each frontend so we can wire their data sources to these endpoints.
 - Extend the routers with any app-specific logic (e.g., CCTV streaming controls) once the core plumbing is running.
+
+## This is under dev
