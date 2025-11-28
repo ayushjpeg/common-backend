@@ -49,6 +49,7 @@ class TaskHistoryRead(BaseModel):
     duration_minutes: int
     note: str | None = None
     status: str
+    task_title: str | None = None
 
     class Config:
         from_attributes = True

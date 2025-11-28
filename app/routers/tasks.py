@@ -23,6 +23,23 @@ def list_tasks(include_archived: bool = False, db: Session = Depends(get_db)):
     return query.order_by(TaskTemplate.created_at.desc()).all()
 
 
+@router.get("/history", response_model=list[TaskHistoryRead])
+def list_all_history(limit: int = 250, db: Session = Depends(get_db)):
+    records = (
+        db.query(TaskHistory, TaskTemplate.title.label("task_title"))
+        .join(TaskTemplate, TaskTemplate.id == TaskHistory.task_id)
+        .order_by(TaskHistory.completed_at.desc())
+        .limit(limit)
+        .all()
+    )
+    history: list[TaskHistoryRead] = []
+    for record, task_title in records:
+        payload = TaskHistoryRead.model_validate(record, from_attributes=True)
+        payload.task_title = task_title
+        history.append(payload)
+    return history
+
+
 @router.post("/", response_model=TaskTemplateRead, status_code=status.HTTP_201_CREATED)
 def create_task(payload: TaskTemplateCreate, db: Session = Depends(get_db)):
     task = TaskTemplate(**payload.model_dump())
@@ -58,12 +75,18 @@ def list_history(task_id: str, db: Session = Depends(get_db)):
     task = db.get(TaskTemplate, task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    return (
+    records = (
         db.query(TaskHistory)
         .filter(TaskHistory.task_id == task_id)
         .order_by(TaskHistory.completed_at.desc())
         .all()
     )
+    response: list[TaskHistoryRead] = []
+    for record in records:
+        payload = TaskHistoryRead.model_validate(record, from_attributes=True)
+        payload.task_title = task.title
+        response.append(payload)
+    return response
 
 
 @router.post("/{task_id}/history", response_model=TaskHistoryRead, status_code=status.HTTP_201_CREATED)
@@ -75,4 +98,6 @@ def add_history(task_id: str, record: TaskHistoryCreate, db: Session = Depends(g
     db.add(history)
     db.commit()
     db.refresh(history)
-    return history
+    payload = TaskHistoryRead.model_validate(history, from_attributes=True)
+    payload.task_title = task.title
+    return payload
