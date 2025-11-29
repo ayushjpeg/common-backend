@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+import logging
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -45,4 +46,5 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     settings = Settings()
     settings.resolved_media_root.mkdir(parents=True, exist_ok=True)
+    logging.getLogger("uvicorn").info("Allowed origins resolved: %s", settings.allowed_origins)
     return settings
