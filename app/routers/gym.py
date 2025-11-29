@@ -32,6 +32,13 @@ _MUSCLE_SYNONYMS = {
     "abs": ("ab", "core"),
     "lats": ("lat",),
     "traps": ("trap",),
+    "biceps": ("bicep", "biceps", "bi"),
+    "triceps": ("tricep", "triceps", "tri"),
+    "calves": ("calf", "gastrocnemius", "soleus"),
+    "forearms": ("forearm", "brach", "wrist flexor", "wrist extensor"),
+    "upper back": ("upper back", "upperback", "mid back", "midback"),
+    "lower back": ("lower back", "lowerback", "lumbar"),
+    "full body": ("full body", "fullbody", "total body"),
 }
 
 
@@ -63,19 +70,38 @@ def _collect_muscle_tokens(exercise: GymExercise | None) -> set[str]:
     return tokens
 
 
+def _collect_slot_tokens(slot_metadata: dict | None) -> set[str]:
+    tokens: set[str] = set()
+    if not slot_metadata:
+        return tokens
+    muscles = slot_metadata.get("muscles") if isinstance(slot_metadata, dict) else None
+    if isinstance(muscles, dict):
+        sources = muscles.keys()
+    elif isinstance(muscles, (list, tuple, set)):
+        sources = muscles
+    else:
+        sources = []
+    for source in sources:
+        normalized = _normalize_muscle(str(source))
+        if normalized:
+            tokens.add(normalized)
+    return tokens
+
+
 def _rank_substitute_candidates(
     reference: GymExercise,
     candidates: list[GymExercise],
+    target_tokens: set[str] | None,
 ) -> list[GymExercise]:
     ref_primary = _normalize_muscle(reference.primary_muscle)
     ref_secondary = _normalize_muscle(reference.secondary_muscle)
-    ref_tokens = _collect_muscle_tokens(reference)
+    tokens_to_match = set(target_tokens or [])
     ranked: list[tuple[float, str, GymExercise]] = []
     for candidate in candidates:
         if not candidate or not candidate.is_active:
             continue
         candidate_tokens = _collect_muscle_tokens(candidate)
-        if candidate.id != reference.id and not (ref_tokens & candidate_tokens):
+        if tokens_to_match and candidate.id != reference.id and not (tokens_to_match & candidate_tokens):
             continue
         primary = _normalize_muscle(candidate.primary_muscle)
         secondary = _normalize_muscle(candidate.secondary_muscle)
@@ -322,6 +348,10 @@ def substitute_assignment(assignment_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assignment has no exercise to substitute")
 
     reference_exercise = _get_exercise_or_404(db, base_exercise_id)
+    target_tokens = _collect_muscle_tokens(reference_exercise)
+    slot_tokens = _collect_slot_tokens(assignment.slot_metadata)
+    if slot_tokens:
+        target_tokens |= slot_tokens
     active_exercises = (
         db.query(GymExercise)
         .filter(GymExercise.is_active.is_(True))
@@ -329,7 +359,7 @@ def substitute_assignment(assignment_id: str, db: Session = Depends(get_db)):
         .all()
     )
 
-    ranked = _rank_substitute_candidates(reference_exercise, active_exercises)
+    ranked = _rank_substitute_candidates(reference_exercise, active_exercises, target_tokens)
     ranked = _append_explicit_options(ranked, assignment.options, db)
 
     ordered_ids: list[str] = []
