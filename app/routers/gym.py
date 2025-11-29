@@ -23,6 +23,97 @@ from ..services.gym_seed import get_default_muscle_targets
 
 router = APIRouter(prefix="/gym", tags=["gym"], dependencies=[Depends(require_api_key)])
 
+_MUSCLE_SYNONYMS = {
+    "shoulders": ("delt", "shoulder"),
+    "chest": ("pec", "chest"),
+    "quads": ("quad",),
+    "hamstrings": ("hamstring",),
+    "glutes": ("glute",),
+    "abs": ("ab", "core"),
+    "lats": ("lat",),
+    "traps": ("trap",),
+}
+
+
+def _normalize_muscle(value: str | None) -> str:
+    if not value:
+        return ""
+    text = value.strip().lower()
+    if not text:
+        return ""
+    for canonical, tokens in _MUSCLE_SYNONYMS.items():
+        if any(token in text for token in tokens):
+            return canonical
+    return text
+
+
+def _collect_muscle_tokens(exercise: GymExercise | None) -> set[str]:
+    tokens: set[str] = set()
+    if not exercise:
+        return tokens
+    sources = [
+        exercise.primary_muscle,
+        exercise.secondary_muscle,
+    ]
+    sources.extend(exercise.muscle_groups or [])
+    for source in sources:
+        normalized = _normalize_muscle(source)
+        if normalized:
+            tokens.add(normalized)
+    return tokens
+
+
+def _rank_substitute_candidates(
+    reference: GymExercise,
+    candidates: list[GymExercise],
+) -> list[GymExercise]:
+    ref_primary = _normalize_muscle(reference.primary_muscle)
+    ref_secondary = _normalize_muscle(reference.secondary_muscle)
+    ref_tokens = _collect_muscle_tokens(reference)
+    ranked: list[tuple[float, str, GymExercise]] = []
+    for candidate in candidates:
+        if not candidate or not candidate.is_active:
+            continue
+        candidate_tokens = _collect_muscle_tokens(candidate)
+        if candidate.id != reference.id and not (ref_tokens & candidate_tokens):
+            continue
+        primary = _normalize_muscle(candidate.primary_muscle)
+        secondary = _normalize_muscle(candidate.secondary_muscle)
+        score: float
+        if candidate.id == reference.id:
+            score = 0.0
+        elif primary == ref_primary:
+            score = 1.0
+        elif secondary == ref_primary:
+            score = 1.5
+        elif ref_secondary and (primary == ref_secondary or secondary == ref_secondary):
+            score = 2.0
+        else:
+            score = 3.0
+        ranked.append((score, candidate.name.lower(), candidate))
+
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    return [item[2] for item in ranked]
+
+
+def _append_explicit_options(
+    ranked: list[GymExercise],
+    option_ids: list[str] | None,
+    db: Session,
+) -> list[GymExercise]:
+    if not option_ids:
+        return ranked
+    existing_ids = {candidate.id for candidate in ranked}
+    for option_id in option_ids:
+        if not option_id or option_id in existing_ids:
+            continue
+        exercise = db.get(GymExercise, option_id)
+        if not exercise or not exercise.is_active:
+            continue
+        ranked.append(exercise)
+        existing_ids.add(exercise.id)
+    return ranked
+
 
 def _get_exercise_or_404(db: Session, exercise_id: str) -> GymExercise:
     exercise = db.get(GymExercise, exercise_id)
@@ -217,6 +308,51 @@ def update_assignment(assignment_id: str, payload: GymDayAssignmentUpdate, db: S
     exercise = _get_exercise_or_404(db, payload.selected_exercise_id)
 
     assignment.selected_exercise_id = exercise.id
+    db.add(assignment)
+    db.commit()
+    db.refresh(assignment)
+    return GymDayAssignmentRead.model_validate(assignment)
+
+
+@router.post("/assignments/{assignment_id}/substitute", response_model=GymDayAssignmentRead)
+def substitute_assignment(assignment_id: str, db: Session = Depends(get_db)):
+    assignment = _get_assignment_or_404(db, assignment_id)
+    base_exercise_id = assignment.selected_exercise_id or assignment.default_exercise_id
+    if not base_exercise_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assignment has no exercise to substitute")
+
+    reference_exercise = _get_exercise_or_404(db, base_exercise_id)
+    active_exercises = (
+        db.query(GymExercise)
+        .filter(GymExercise.is_active.is_(True))
+        .order_by(GymExercise.name)
+        .all()
+    )
+
+    ranked = _rank_substitute_candidates(reference_exercise, active_exercises)
+    ranked = _append_explicit_options(ranked, assignment.options, db)
+
+    ordered_ids: list[str] = []
+    seen_ids: set[str] = set()
+    for exercise in ranked:
+        if exercise.id not in seen_ids:
+            ordered_ids.append(exercise.id)
+            seen_ids.add(exercise.id)
+
+    current_exercise_id = assignment.selected_exercise_id or reference_exercise.id
+    if current_exercise_id not in seen_ids:
+        ordered_ids.insert(0, current_exercise_id)
+        seen_ids.add(current_exercise_id)
+
+    if len(ordered_ids) <= 1:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No substitute exercises found for this slot")
+
+    current_index = ordered_ids.index(current_exercise_id)
+    next_exercise_id = ordered_ids[(current_index + 1) % len(ordered_ids)]
+    if next_exercise_id == current_exercise_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No substitute exercises found for this slot")
+
+    assignment.selected_exercise_id = next_exercise_id
     db.add(assignment)
     db.commit()
     db.refresh(assignment)
