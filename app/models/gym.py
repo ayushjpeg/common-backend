@@ -53,7 +53,7 @@ class GymDayAssignment(Base):
     default_exercise_id = Column(String(64), ForeignKey("gym_exercises.id", ondelete="SET NULL"), nullable=True)
     selected_exercise_id = Column(String(64), ForeignKey("gym_exercises.id", ondelete="SET NULL"), nullable=True)
     options = Column(JSON, nullable=False, default=list)
-    metadata = Column(JSON, nullable=False, default=dict)
+    slot_metadata = Column("metadata", JSON, nullable=False, default=dict)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     default_exercise = relationship("GymExercise", foreign_keys=[default_exercise_id], back_populates="default_assignments")

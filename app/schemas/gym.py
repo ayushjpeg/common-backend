@@ -88,7 +88,10 @@ class GymDayAssignmentBase(BaseModel):
     default_exercise_id: str | None = None
     selected_exercise_id: str | None = None
     options: list[str] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict, alias="slot_metadata")
+
+    class Config:
+        populate_by_name = True
 
 
 class GymDayAssignmentRead(GymDayAssignmentBase):
@@ -96,6 +99,7 @@ class GymDayAssignmentRead(GymDayAssignmentBase):
 
     class Config:
         from_attributes = True
+        populate_by_name = True
 
 
 class GymDayAssignmentUpdate(BaseModel):

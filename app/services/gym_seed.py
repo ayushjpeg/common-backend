@@ -77,7 +77,7 @@ def _seed_exercises(db: Session) -> None:
                 default_exercise_id=slot.get("default_exercise"),
                 selected_exercise_id=slot.get("default_exercise"),
                 options=slot.get("options", []),
-                metadata=metadata,
+                slot_metadata=metadata,
             )
             db.add(assignment)
     db.flush()
