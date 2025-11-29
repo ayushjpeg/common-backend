@@ -377,9 +377,16 @@ def substitute_assignment(assignment_id: str, db: Session = Depends(get_db)):
     if len(ordered_ids) <= 1:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No substitute exercises found for this slot")
 
+    assignment.options = ordered_ids
+
     current_index = ordered_ids.index(current_exercise_id)
-    next_exercise_id = ordered_ids[(current_index + 1) % len(ordered_ids)]
-    if next_exercise_id == current_exercise_id:
+    next_exercise_id: str | None = None
+    for step in range(1, len(ordered_ids) + 1):
+        candidate_id = ordered_ids[(current_index + step) % len(ordered_ids)]
+        if candidate_id != current_exercise_id:
+            next_exercise_id = candidate_id
+            break
+    if not next_exercise_id or next_exercise_id == current_exercise_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No substitute exercises found for this slot")
 
     assignment.selected_exercise_id = next_exercise_id
