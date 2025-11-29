@@ -10,6 +10,7 @@ _DEFAULT_ORIGINS = [
     "http://localhost:8006",
     "http://localhost:4173",
     "http://localhost:3000",
+    "http://localhost:8004",
     "https://food.ayux.in",
     "https://cctv.ayux.in",
     "https://gym.ayux.in",
