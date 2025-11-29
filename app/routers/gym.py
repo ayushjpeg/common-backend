@@ -216,9 +216,6 @@ def update_assignment(assignment_id: str, payload: GymDayAssignmentUpdate, db: S
     assignment = _get_assignment_or_404(db, assignment_id)
     exercise = _get_exercise_or_404(db, payload.selected_exercise_id)
 
-    if assignment.options and payload.selected_exercise_id not in assignment.options:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Exercise not allowed for this slot")
-
     assignment.selected_exercise_id = exercise.id
     db.add(assignment)
     db.commit()
