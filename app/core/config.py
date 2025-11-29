@@ -27,14 +27,17 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg2://task_user:task_password@localhost:5432/task_ops"
     media_root: Path = Path("./storage")
     media_base_url: str | None = None
-    allowed_origins: list[str] = Field(default_factory=lambda: _DEFAULT_ORIGINS.copy())
+    allowed_origins: list[str] | str = Field(default_factory=lambda: _DEFAULT_ORIGINS.copy())
     api_key: str = "super-secret-key"
 
     @field_validator("allowed_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):
-            return [origin.strip() for origin in value.split(",") if origin.strip()]
+            stripped = value.strip()
+            if not stripped:
+                return _DEFAULT_ORIGINS.copy()
+            return [origin.strip() for origin in stripped.split(",") if origin.strip()]
         return value
 
     @property
