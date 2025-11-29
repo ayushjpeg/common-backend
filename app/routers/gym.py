@@ -359,37 +359,40 @@ def substitute_assignment(assignment_id: str, db: Session = Depends(get_db)):
         .all()
     )
 
-    ranked = _rank_substitute_candidates(reference_exercise, active_exercises, target_tokens)
-    ranked = _append_explicit_options(ranked, assignment.options, db)
-
-    ordered_ids: list[str] = []
-    seen_ids: set[str] = set()
-    for exercise in ranked:
-        if exercise.id not in seen_ids:
-            ordered_ids.append(exercise.id)
-            seen_ids.add(exercise.id)
-
     current_exercise_id = assignment.selected_exercise_id or reference_exercise.id
-    if current_exercise_id not in seen_ids:
-        ordered_ids.insert(0, current_exercise_id)
-        seen_ids.add(current_exercise_id)
 
-    if len(ordered_ids) <= 1:
+    def _build_rotation() -> list[str]:
+        ranked = _rank_substitute_candidates(reference_exercise, active_exercises, target_tokens)
+        ranked = _append_explicit_options(ranked, assignment.options, db)
+        unique_ids: list[str] = []
+        seen_ids: set[str] = set()
+        for exercise in ranked:
+            if exercise.id not in seen_ids:
+                unique_ids.append(exercise.id)
+                seen_ids.add(exercise.id)
+        if current_exercise_id not in seen_ids:
+            unique_ids.insert(0, current_exercise_id)
+        return unique_ids
+
+    rotation = [exercise_id for exercise_id in (assignment.options or []) if exercise_id]
+    if current_exercise_id not in rotation or len(rotation) <= 1:
+        rotation = _build_rotation()
+
+    if len(rotation) <= 1:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No substitute exercises found for this slot")
 
-    if ordered_ids[0] != current_exercise_id:
-        current_index = ordered_ids.index(current_exercise_id)
-        ordered_ids = ordered_ids[current_index:] + ordered_ids[:current_index]
+    while rotation and rotation[0] != current_exercise_id:
+        rotation = rotation[1:] + rotation[:1]
+    if rotation[0] != current_exercise_id:
+        rotation = _build_rotation()
+        if len(rotation) <= 1:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No substitute exercises found for this slot")
 
-    assignment.options = ordered_ids
-
-    if len(ordered_ids) < 2:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No substitute exercises found for this slot")
-
-    next_exercise_id = ordered_ids[1]
+    next_exercise_id = rotation[1]
     next_exercise = _get_exercise_or_404(db, next_exercise_id)
 
     assignment.selected_exercise = next_exercise
+    assignment.options = rotation[1:] + rotation[:1]
     db.add(assignment)
     db.commit()
     db.refresh(assignment)
