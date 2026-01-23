@@ -159,3 +159,7 @@ class ScheduleCommitResponse(BaseModel):
     stored: bool = False
     plan: list[ScheduledTaskCandidate] = Field(default_factory=list)
     ai_response: str | None = None
+
+
+class PromptConfig(BaseModel):
+    prompt: str

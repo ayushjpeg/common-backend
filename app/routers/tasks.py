@@ -5,8 +5,10 @@ from sqlalchemy.orm import Session
 
 from ..core.database import get_db
 from ..core.security import require_api_key
+from ..models.setting import AppSetting
 from ..models.task import TaskHistory, TaskTemplate
 from ..schemas.task import (
+    PromptConfig,
     ScheduleCommitRequest,
     ScheduleCommitResponse,
     SchedulePreviewResponse,
@@ -274,3 +276,32 @@ def commit_schedule(request: ScheduleCommitRequest):
         plan=request.plan,
         ai_response=request.ai_response,
     )
+
+
+def _get_setting(db: Session, key: str) -> str:
+    record = db.get(AppSetting, key)
+    return record.value if record else ""
+
+
+def _set_setting(db: Session, key: str, value: str) -> str:
+    record = db.get(AppSetting, key)
+    if record:
+        record.value = value
+    else:
+        record = AppSetting(key=key, value=value)
+        db.add(record)
+    db.commit()
+    db.refresh(record)
+    return record.value
+
+
+@router.get("/prompt", response_model=PromptConfig)
+def get_prompt(db: Session = Depends(get_db)):
+    value = _get_setting(db, "tasks_prompt")
+    return PromptConfig(prompt=value)
+
+
+@router.put("/prompt", response_model=PromptConfig)
+def set_prompt(payload: PromptConfig, db: Session = Depends(get_db)):
+    value = _set_setting(db, "tasks_prompt", payload.prompt)
+    return PromptConfig(prompt=value)
