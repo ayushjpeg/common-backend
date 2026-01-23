@@ -211,8 +211,15 @@ def _classify_task(task: TaskTemplate, last_done: date | None, week_start: date,
 
 def _build_prompt(week_start: date, week_end: date, tasks: list[ScheduledTaskCandidate], request: ScheduleRequest) -> str:
     lines: list[str] = []
-    lines.append("You are scheduling tasks for the week.")
+    lines.append("You are scheduling tasks for the upcoming week only. Do not place anything outside this range.")
     lines.append(f"Week range: {week_start.isoformat()} to {week_end.isoformat()} (Saturday to Friday).")
+    lines.append("Recurrence rules:")
+    lines.append(
+        "- repeat: place the next occurrence within start_after_days to end_before_days after the last completion date; if never completed, count from today."
+    )
+    lines.append("- one_time: place exactly once within its allowed window; if no overlap with the week, skip it.")
+    lines.append("If a task's allowed window does not intersect this week, skip scheduling it and note the reason.")
+
     if request.user_busy:
         lines.append("Busy windows to avoid:")
         for window in request.user_busy:
@@ -221,16 +228,26 @@ def _build_prompt(week_start: date, week_end: date, tasks: list[ScheduledTaskCan
         lines.append("Preferred windows:")
         for window in request.user_preferences:
             lines.append(f"- {window.day or 'any'} {window.start_time or ''}-{window.end_time or ''} ({window.note or window.kind or 'preferred'})")
-    lines.append("Tasks:")
+
+    lines.append("Tasks to consider (include only those with overlap this week):")
     for task in tasks:
         if task.classification == "skip":
             continue
-        note = "(must)" if task.classification == "must" else "(do if possible)"
-        window_hint = f"start after {task.start_after_days} days, end before {task.end_before_days} days"
+        note = "must" if task.classification == "must" else "do_if_possible"
+        start_after = task.start_after_days if task.start_after_days is not None else 0
+        end_before = task.end_before_days if task.end_before_days is not None else start_after
         lines.append(
-            f"- {task.title} {note} | {task.duration_minutes} min | window {task.window_start.isoformat()} to {task.window_end.isoformat()} | {window_hint} | last done {task.last_completed_at or 'never'}"
+            f"- {task.title} [{note} | mode={task.mode}] | {task.duration_minutes} min | schedule window {task.window_start.isoformat()} to {task.window_end.isoformat()} | allowed {start_after}-{end_before} days after last completion ({task.last_completed_at or 'never'}) | priority {task.priority} | importance {task.importance or 'n/a'} | category {task.category or 'n/a'}"
         )
-    lines.append("Return concrete day/time placements for each task across the week. Spread repeat tasks according to their start/end day window; avoid stacking everything on one day.")
+        if task.preferred_windows:
+            lines.append("  preferred: " + "; ".join([f"{w.day or 'any'} {w.start_time or ''}-{w.end_time or ''}" for w in task.preferred_windows]))
+        if task.busy_windows:
+            lines.append("  avoid: " + "; ".join([f"{w.day or 'any'} {w.start_time or ''}-{w.end_time or ''}" for w in task.busy_windows]))
+
+    lines.append(
+        "Return a concise plan with concrete day/time for each scheduled task inside this week. Distribute repeat tasks across the week, respect busy windows, and avoid clustering everything on one day."
+    )
+    lines.append("If you skip a task, state `skipped: <reason>` so the user understands why.")
     return "\n".join(lines)
 
 
@@ -244,6 +261,7 @@ def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db)):
         last_done = _get_last_completed_at(db, task.id)
         classification = _classify_task(task, last_done, week_start, week_end)
         meta = task.metadata_json or {}
+        mode, start_after, end_before = _extract_recurrence(task)
         candidate = ScheduledTaskCandidate(
             task_id=task.id,
             title=task.title,
@@ -252,8 +270,9 @@ def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db)):
             classification=classification,
             window_start=week_start,
             window_end=week_end,
-            start_after_days=task.recurrence.get("config", {}).get("start_after_days") if task.recurrence else None,
-            end_before_days=task.recurrence.get("config", {}).get("end_before_days") if task.recurrence else None,
+            mode=mode,
+            start_after_days=start_after,
+            end_before_days=end_before,
             last_completed_at=last_done,
             preferred_windows=meta.get("preferred_windows") or [],
             busy_windows=meta.get("busy_windows") or [],

@@ -127,6 +127,7 @@ class ScheduledTaskCandidate(BaseModel):
     title: str
     duration_minutes: int
     priority: str
+    mode: Literal["repeat", "one_time"] = "repeat"
     classification: Literal["must", "do_if_possible", "skip"]
     window_start: date
     window_end: date
