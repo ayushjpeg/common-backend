@@ -169,29 +169,6 @@ def _extract_recurrence(task: TaskTemplate) -> tuple[str, int, int]:
     return mode, start_after, end_before
 
 
-def _generate_expected_dates(task: TaskTemplate, week_start: date, week_end: date, last_done: date | None) -> list[date]:
-    mode, start_after, end_before = _extract_recurrence(task)
-    dates: list[date] = []
-    today = date.today()
-    base = last_done or today
-
-    if mode == "repeat":
-        step = max(1, start_after or 1)
-        current = base + timedelta(days=start_after)
-        while current <= week_end:
-            if current >= week_start:
-                dates.append(current)
-            current = current + timedelta(days=step)
-    else:  # one_time
-        earliest = base + timedelta(days=start_after)
-        latest = base + timedelta(days=end_before)
-        candidate = max(earliest, week_start)
-        if candidate <= week_end and candidate <= latest:
-            dates.append(candidate)
-
-    return dates
-
-
 def _classify_task(task: TaskTemplate, last_done: date | None, week_start: date, week_end: date) -> str:
     mode, start_after, end_before = _extract_recurrence(task)
     today = date.today()
@@ -215,10 +192,12 @@ def _build_prompt(week_start: date, week_end: date, tasks: list[ScheduledTaskCan
     lines.append(f"Week range: {week_start.isoformat()} to {week_end.isoformat()} (Saturday to Friday).")
     lines.append("Recurrence rules:")
     lines.append(
-        "- repeat: place the next occurrence within start_after_days to end_before_days after the last completion date; if never completed, count from today."
+        "- repeat: derive every occurrence that fits in this week by chaining the window from the last completion (or today if none). Each occurrence must be >= start_after_days and <= end_before_days after the previous one. Keep chaining until you pass the week end."
     )
-    lines.append("- one_time: place exactly once within its allowed window; if no overlap with the week, skip it.")
-    lines.append("If a task's allowed window does not intersect this week, skip scheduling it and note the reason.")
+    lines.append("- one_time: place exactly once within its allowed window; if no overlap with the week, skip and explain.")
+    lines.append(
+        "If a task's allowed window does not intersect this week, skip it and state `skipped: reason`. Prefer preferred windows (e.g., mornings) and avoid busy windows when picking exact times."
+    )
 
     if request.user_busy:
         lines.append("Busy windows to avoid:")
@@ -229,7 +208,7 @@ def _build_prompt(week_start: date, week_end: date, tasks: list[ScheduledTaskCan
         for window in request.user_preferences:
             lines.append(f"- {window.day or 'any'} {window.start_time or ''}-{window.end_time or ''} ({window.note or window.kind or 'preferred'})")
 
-    lines.append("Tasks to consider (include only those with overlap this week):")
+    lines.append("Tasks to consider (only schedule if the allowed window intersects this week):")
     for task in tasks:
         if task.classification == "skip":
             continue
@@ -245,7 +224,7 @@ def _build_prompt(week_start: date, week_end: date, tasks: list[ScheduledTaskCan
             lines.append("  avoid: " + "; ".join([f"{w.day or 'any'} {w.start_time or ''}-{w.end_time or ''}" for w in task.busy_windows]))
 
     lines.append(
-        "Return a concise plan with concrete day/time for each scheduled task inside this week. Distribute repeat tasks across the week, respect busy windows, and avoid clustering everything on one day."
+        "Return a concise plan with concrete day/time for each scheduled task inside this week. Distribute repeat tasks per their chained windows, respect busy windows, keep times inside preferred dayparts when given, and avoid clustering everything on one day."
     )
     lines.append("If you skip a task, state `skipped: <reason>` so the user understands why.")
     return "\n".join(lines)
