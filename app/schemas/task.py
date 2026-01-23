@@ -130,14 +130,13 @@ class ScheduledTaskCandidate(BaseModel):
     classification: Literal["must", "do_if_possible", "skip"]
     window_start: date
     window_end: date
-    frequency_min_days: int | None = None
-    frequency_max_days: int | None = None
+    start_after_days: int | None = None
+    end_before_days: int | None = None
     last_completed_at: datetime | None = None
     preferred_windows: list[TimeWindow] = Field(default_factory=list)
     busy_windows: list[TimeWindow] = Field(default_factory=list)
     importance: str | None = None
     category: str | None = None
-    expected_dates: list[date] = Field(default_factory=list)
 
 
 class SchedulePreviewResponse(BaseModel):

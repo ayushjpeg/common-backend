@@ -203,12 +203,10 @@ def _classify_task(task: TaskTemplate, last_done: date | None, week_start: date,
 
     earliest = base + timedelta(days=start_after)
     latest = base + timedelta(days=end_before)
-
-    if week_end < earliest or week_start > latest:
-        return "skip"
-    if week_start >= earliest and week_end <= latest:
+    # If the target week overlaps the allowed window, treat as must.
+    if week_end >= earliest and week_start <= latest:
         return "must"
-    return "do_if_possible"
+    return "skip"
 
 
 def _build_prompt(week_start: date, week_end: date, tasks: list[ScheduledTaskCandidate], request: ScheduleRequest) -> str:
@@ -228,12 +226,11 @@ def _build_prompt(week_start: date, week_end: date, tasks: list[ScheduledTaskCan
         if task.classification == "skip":
             continue
         note = "(must)" if task.classification == "must" else "(do if possible)"
-        expected = f" expected on {', '.join([d.isoformat() for d in task.expected_dates])}" if task.expected_dates else ""
+        window_hint = f"start after {task.start_after_days} days, end before {task.end_before_days} days"
         lines.append(
-            f"- {task.title} {note} | {task.duration_minutes} min | window {task.window_start.isoformat()} to {task.window_end.isoformat()} {expected}"
+            f"- {task.title} {note} | {task.duration_minutes} min | window {task.window_start.isoformat()} to {task.window_end.isoformat()} | {window_hint} | last done {task.last_completed_at or 'never'}"
         )
-    lines.append("Return a day/time suggestion for each non-skip task within the week.")
-    lines.append("When recurrence mode is repeat, schedule multiple sessions across the week following the suggested dates above instead of stacking them on one day.")
+    lines.append("Return concrete day/time placements for each task across the week. Spread repeat tasks according to their start/end day window; avoid stacking everything on one day.")
     return "\n".join(lines)
 
 
@@ -247,7 +244,6 @@ def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db)):
         last_done = _get_last_completed_at(db, task.id)
         classification = _classify_task(task, last_done, week_start, week_end)
         meta = task.metadata_json or {}
-        expected_dates = _generate_expected_dates(task, week_start, week_end, last_done)
         candidate = ScheduledTaskCandidate(
             task_id=task.id,
             title=task.title,
@@ -256,14 +252,13 @@ def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db)):
             classification=classification,
             window_start=week_start,
             window_end=week_end,
-            frequency_min_days=meta.get("frequency_min_days"),
-            frequency_max_days=meta.get("frequency_max_days"),
+            start_after_days=task.recurrence.get("config", {}).get("start_after_days") if task.recurrence else None,
+            end_before_days=task.recurrence.get("config", {}).get("end_before_days") if task.recurrence else None,
             last_completed_at=last_done,
             preferred_windows=meta.get("preferred_windows") or [],
             busy_windows=meta.get("busy_windows") or [],
             importance=meta.get("importance"),
             category=meta.get("category"),
-            expected_dates=expected_dates,
         )
         candidates.append(candidate)
 
