@@ -160,13 +160,19 @@ def _resolve_week(request: ScheduleRequest) -> tuple[date, date]:
 
 def _classify_task(task: TaskTemplate, last_done: date | None, week_start: date, week_end: date) -> str:
     meta = task.metadata_json or {}
-    min_days = meta.get("frequency_min_days") or 0
-    max_days = meta.get("frequency_max_days") or min_days or 30
+    min_days = meta.get("frequency_min_days")
+    max_days = meta.get("frequency_max_days")
+
+    # Defaults: if not provided, assume very flexible (due anytime) so we don't skip.
+    min_days = 0 if min_days is None else max(0, min_days)
+    max_days = 365 if max_days is None else max(1, max_days)
+
     if last_done is None:
         earliest = week_start
+        latest = week_end
     else:
         earliest = last_done + timedelta(days=min_days)
-    latest = (last_done or week_start) + timedelta(days=max_days)
+        latest = last_done + timedelta(days=max_days)
 
     if week_end < earliest or week_start > latest:
         return "skip"
@@ -189,11 +195,9 @@ def _build_prompt(week_start: date, week_end: date, tasks: list[ScheduledTaskCan
             lines.append(f"- {window.day or 'any'} {window.start_time or ''}-{window.end_time or ''} ({window.note or window.kind or 'preferred'})")
     lines.append("Tasks:")
     for task in tasks:
-        note = ""
-        if task.classification == "must":
-            note = "(must)"
-        elif task.classification == "do_if_possible":
-            note = "(do if possible)"
+        if task.classification == "skip":
+            continue
+        note = "(must)" if task.classification == "must" else "(do if possible)"
         lines.append(
             f"- {task.title} {note} | {task.duration_minutes} min | window {task.window_start.isoformat()} to {task.window_end.isoformat()}"
         )
