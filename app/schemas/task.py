@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -138,6 +138,13 @@ class ScheduledTaskCandidate(BaseModel):
     preferred_window: str | None = None
 
 
+class ScheduledTaskSlot(BaseModel):
+    task_id: str
+    scheduled_time: time | None = None
+    scheduled_date: date
+    last_completed_at: datetime | None = None
+
+
 class SchedulePreviewResponse(BaseModel):
     week_start: date
     week_end: date
@@ -148,14 +155,14 @@ class SchedulePreviewResponse(BaseModel):
 class ScheduleCommitRequest(BaseModel):
     week_start: date
     week_end: date
-    plan: list[ScheduledTaskCandidate]
+    plan: list[ScheduledTaskSlot]
     ai_response: str | None = None
 
 
 class ScheduleCommitResponse(BaseModel):
     message: str
     stored: bool = False
-    plan: list[ScheduledTaskCandidate] = Field(default_factory=list)
+    plan: list[ScheduledTaskSlot] = Field(default_factory=list)
     ai_response: str | None = None
 
 

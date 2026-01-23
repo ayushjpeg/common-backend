@@ -1,4 +1,5 @@
-from datetime import date, timedelta
+from collections import defaultdict
+from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -14,6 +15,7 @@ from ..schemas.task import (
     SchedulePreviewResponse,
     ScheduleRequest,
     ScheduledTaskCandidate,
+    ScheduledTaskSlot,
     TaskHistoryCreate,
     TaskHistoryRead,
     TaskTemplateCreate,
@@ -263,11 +265,43 @@ def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/schedule/commit", response_model=ScheduleCommitResponse)
-def commit_schedule(request: ScheduleCommitRequest):
-    # Placeholder: we do not persist a schedule yet; this captures the contract for frontends and AI.
+def commit_schedule(request: ScheduleCommitRequest, db: Session = Depends(get_db)):
+    if not request.plan:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan cannot be empty")
+
+    task_ids = {slot.task_id for slot in request.plan}
+    tasks = db.query(TaskTemplate).filter(TaskTemplate.id.in_(task_ids)).all()
+    found_ids = {task.id for task in tasks}
+    missing = sorted(task_ids - found_ids)
+    if missing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown task ids: {', '.join(missing)}")
+
+    def _slot_datetime(slot: ScheduledTaskSlot) -> datetime:
+        scheduled_time = slot.scheduled_time or time(hour=9, minute=0)
+        return datetime.combine(slot.scheduled_date, scheduled_time)
+
+    plan_by_task: dict[str, list[datetime]] = defaultdict(list)
+    last_completed_by_task: dict[str, datetime] = {}
+    for slot in request.plan:
+        plan_by_task[slot.task_id].append(_slot_datetime(slot))
+        if slot.last_completed_at:
+            last_completed_by_task[slot.task_id] = slot.last_completed_at
+
+    stored_any = False
+    for task in tasks:
+        slots = sorted(plan_by_task.get(task.id, []))
+        meta = dict(task.metadata_json or {})
+        meta["scheduled_slots"] = [slot.isoformat() for slot in slots]
+        meta["nextDueDate"] = slots[0].date().isoformat() if slots else None
+        if task.id in last_completed_by_task:
+            meta["lastCompletedAt"] = last_completed_by_task[task.id].isoformat()
+        task.metadata_json = meta
+        stored_any = stored_any or bool(slots)
+
+    db.commit()
     return ScheduleCommitResponse(
-        message="Plan received; persistence not yet implemented",
-        stored=False,
+        message="Plan stored in task metadata",
+        stored=stored_any,
         plan=request.plan,
         ai_response=request.ai_response,
     )
