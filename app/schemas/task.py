@@ -1,7 +1,15 @@
-from datetime import datetime
-from typing import Any
+from datetime import date, datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+
+class TimeWindow(BaseModel):
+    day: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
+    kind: str | None = None
+    note: str | None = None
 
 
 class TaskRecurrence(BaseModel):
@@ -16,6 +24,12 @@ class TaskTemplateBase(BaseModel):
     priority: str = "medium"
     recurrence: TaskRecurrence = Field(default_factory=TaskRecurrence)
     metadata_json: dict[str, Any] = Field(default_factory=dict)
+    frequency_min_days: int | None = Field(default=None, ge=0)
+    frequency_max_days: int | None = Field(default=None, ge=0)
+    preferred_windows: list[TimeWindow] = Field(default_factory=list)
+    busy_windows: list[TimeWindow] = Field(default_factory=list)
+    importance: Literal["must", "do_if_possible", "flex"] | None = None
+    category: str | None = None
 
 
 class TaskTemplateCreate(TaskTemplateBase):
@@ -30,6 +44,12 @@ class TaskTemplateUpdate(BaseModel):
     recurrence: TaskRecurrence | None = None
     metadata_json: dict[str, Any] | None = None
     is_archived: bool | None = None
+    frequency_min_days: int | None = Field(default=None, ge=0)
+    frequency_max_days: int | None = Field(default=None, ge=0)
+    preferred_windows: list[TimeWindow] | None = None
+    busy_windows: list[TimeWindow] | None = None
+    importance: Literal["must", "do_if_possible", "flex"] | None = None
+    category: str | None = None
 
 
 class TaskTemplateRead(TaskTemplateBase):
@@ -40,6 +60,27 @@ class TaskTemplateRead(TaskTemplateBase):
 
     class Config:
         from_attributes = True
+
+    @classmethod
+    def _extract_meta(cls, values: dict[str, Any]) -> dict[str, Any]:
+        meta = values.get("metadata_json") or {}
+        for key in [
+            "frequency_min_days",
+            "frequency_max_days",
+            "preferred_windows",
+            "busy_windows",
+            "importance",
+            "category",
+        ]:
+            if key in meta and values.get(key) is None:
+                values[key] = meta.get(key)
+        return values
+
+    @classmethod
+    def model_validate(cls, obj: Any, *args, **kwargs):  # type: ignore[override]
+        if isinstance(obj, dict):
+            obj = cls._extract_meta(dict(obj))
+        return super().model_validate(obj, *args, **kwargs)
 
 
 class TaskHistoryRead(BaseModel):
@@ -60,3 +101,48 @@ class TaskHistoryCreate(BaseModel):
     duration_minutes: int
     note: str | None = None
     status: str = "completed"
+
+
+class ScheduleRequest(BaseModel):
+    week_start: date | None = None
+    week_end: date | None = None
+    user_busy: list[TimeWindow] = Field(default_factory=list)
+    user_preferences: list[TimeWindow] = Field(default_factory=list)
+
+
+class ScheduledTaskCandidate(BaseModel):
+    task_id: str
+    title: str
+    duration_minutes: int
+    priority: str
+    classification: Literal["must", "do_if_possible", "skip"]
+    window_start: date
+    window_end: date
+    frequency_min_days: int | None = None
+    frequency_max_days: int | None = None
+    last_completed_at: datetime | None = None
+    preferred_windows: list[TimeWindow] = Field(default_factory=list)
+    busy_windows: list[TimeWindow] = Field(default_factory=list)
+    importance: str | None = None
+    category: str | None = None
+
+
+class SchedulePreviewResponse(BaseModel):
+    week_start: date
+    week_end: date
+    prompt: str
+    tasks: list[ScheduledTaskCandidate]
+
+
+class ScheduleCommitRequest(BaseModel):
+    week_start: date
+    week_end: date
+    plan: list[ScheduledTaskCandidate]
+    ai_response: str | None = None
+
+
+class ScheduleCommitResponse(BaseModel):
+    message: str
+    stored: bool = False
+    plan: list[ScheduledTaskCandidate] = Field(default_factory=list)
+    ai_response: str | None = None

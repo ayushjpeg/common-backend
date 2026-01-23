@@ -1,3 +1,5 @@
+from datetime import date, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -5,6 +7,11 @@ from ..core.database import get_db
 from ..core.security import require_api_key
 from ..models.task import TaskHistory, TaskTemplate
 from ..schemas.task import (
+    ScheduleCommitRequest,
+    ScheduleCommitResponse,
+    SchedulePreviewResponse,
+    ScheduleRequest,
+    ScheduledTaskCandidate,
     TaskHistoryCreate,
     TaskHistoryRead,
     TaskTemplateCreate,
@@ -41,8 +48,31 @@ def list_all_history(limit: int = 250, db: Session = Depends(get_db)):
 
 
 @router.post("/", response_model=TaskTemplateRead, status_code=status.HTTP_201_CREATED)
+def _merge_metadata(payload: TaskTemplateCreate | TaskTemplateUpdate, base: dict | None = None) -> dict:
+    meta = dict(base or {})
+    for key in [
+        "frequency_min_days",
+        "frequency_max_days",
+        "preferred_windows",
+        "busy_windows",
+        "importance",
+        "category",
+    ]:
+        value = getattr(payload, key, None)
+        if value is not None:
+            meta[key] = value
+    return meta
+
+
 def create_task(payload: TaskTemplateCreate, db: Session = Depends(get_db)):
-    task = TaskTemplate(**payload.model_dump())
+    task = TaskTemplate(
+        title=payload.title,
+        description=payload.description,
+        duration_minutes=payload.duration_minutes,
+        priority=payload.priority,
+        recurrence=payload.recurrence.model_dump(),
+        metadata_json=_merge_metadata(payload, payload.metadata_json),
+    )
     db.add(task)
     db.commit()
     db.refresh(task)
@@ -54,8 +84,16 @@ def update_task(task_id: str, payload: TaskTemplateUpdate, db: Session = Depends
     task = db.get(TaskTemplate, task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    for key, value in payload.model_dump(exclude_unset=True).items():
-        setattr(task, key, value)
+
+    updates = payload.model_dump(exclude_unset=True)
+    metadata_patch = _merge_metadata(payload, updates.pop("metadata_json", task.metadata_json))
+
+    for key in ["title", "description", "duration_minutes", "priority", "recurrence", "is_archived"]:
+        if key in updates:
+            setattr(task, key, updates[key])
+
+    task.metadata_json = metadata_patch
+
     db.commit()
     db.refresh(task)
     return task
@@ -101,3 +139,107 @@ def add_history(task_id: str, record: TaskHistoryCreate, db: Session = Depends(g
     payload = TaskHistoryRead.model_validate(history, from_attributes=True)
     payload.task_title = task.title
     return payload
+
+
+def _get_last_completed_at(db: Session, task_id: str) -> date | None:
+    record = (
+        db.query(TaskHistory.completed_at)
+        .filter(TaskHistory.task_id == task_id)
+        .order_by(TaskHistory.completed_at.desc())
+        .first()
+    )
+    return record[0].date() if record else None
+
+
+def _resolve_week(request: ScheduleRequest) -> tuple[date, date]:
+    today = date.today()
+    week_start = request.week_start or today + timedelta(days=(5 - today.weekday()) % 7)
+    week_end = request.week_end or week_start + timedelta(days=6)
+    return week_start, week_end
+
+
+def _classify_task(task: TaskTemplate, last_done: date | None, week_start: date, week_end: date) -> str:
+    meta = task.metadata_json or {}
+    min_days = meta.get("frequency_min_days") or 0
+    max_days = meta.get("frequency_max_days") or min_days or 30
+    if last_done is None:
+        earliest = week_start
+    else:
+        earliest = last_done + timedelta(days=min_days)
+    latest = (last_done or week_start) + timedelta(days=max_days)
+
+    if week_end < earliest or week_start > latest:
+        return "skip"
+    if week_start >= earliest and week_end <= latest:
+        return "must"
+    return "do_if_possible"
+
+
+def _build_prompt(week_start: date, week_end: date, tasks: list[ScheduledTaskCandidate], request: ScheduleRequest) -> str:
+    lines: list[str] = []
+    lines.append("You are scheduling tasks for the week.")
+    lines.append(f"Week range: {week_start.isoformat()} to {week_end.isoformat()} (Saturday to Friday).")
+    if request.user_busy:
+        lines.append("Busy windows to avoid:")
+        for window in request.user_busy:
+            lines.append(f"- {window.day or 'any'} {window.start_time or ''}-{window.end_time or ''} ({window.note or 'busy'})")
+    if request.user_preferences:
+        lines.append("Preferred windows:")
+        for window in request.user_preferences:
+            lines.append(f"- {window.day or 'any'} {window.start_time or ''}-{window.end_time or ''} ({window.note or window.kind or 'preferred'})")
+    lines.append("Tasks:")
+    for task in tasks:
+        note = ""
+        if task.classification == "must":
+            note = "(must)"
+        elif task.classification == "do_if_possible":
+            note = "(do if possible)"
+        lines.append(
+            f"- {task.title} {note} | {task.duration_minutes} min | window {task.window_start.isoformat()} to {task.window_end.isoformat()}"
+        )
+    lines.append("Return a day/time suggestion for each non-skip task within the week.")
+    return "\n".join(lines)
+
+
+@router.post("/schedule/preview", response_model=SchedulePreviewResponse)
+def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db)):
+    week_start, week_end = _resolve_week(request)
+    tasks = db.query(TaskTemplate).filter(TaskTemplate.is_archived.is_(False)).all()
+
+    candidates: list[ScheduledTaskCandidate] = []
+    for task in tasks:
+        last_done = _get_last_completed_at(db, task.id)
+        classification = _classify_task(task, last_done, week_start, week_end)
+        meta = task.metadata_json or {}
+        candidate = ScheduledTaskCandidate(
+            task_id=task.id,
+            title=task.title,
+            duration_minutes=task.duration_minutes,
+            priority=task.priority,
+            classification=classification,
+            window_start=week_start,
+            window_end=week_end,
+            frequency_min_days=meta.get("frequency_min_days"),
+            frequency_max_days=meta.get("frequency_max_days"),
+            last_completed_at=last_done,
+            preferred_windows=meta.get("preferred_windows") or [],
+            busy_windows=meta.get("busy_windows") or [],
+            importance=meta.get("importance"),
+            category=meta.get("category"),
+        )
+        candidates.append(candidate)
+
+    prompt = _build_prompt(week_start, week_end, candidates, request)
+
+    return SchedulePreviewResponse(week_start=week_start, week_end=week_end, prompt=prompt, tasks=candidates)
+
+
+@router.post("/schedule/commit", response_model=ScheduleCommitResponse)
+def commit_schedule(request: ScheduleCommitRequest):
+    # Placeholder: we do not persist a schedule yet; this captures the contract for frontends and AI.
+    return ScheduleCommitResponse(
+        message="Plan received; persistence not yet implemented",
+        stored=False,
+        plan=request.plan,
+        ai_response=request.ai_response,
+    )
