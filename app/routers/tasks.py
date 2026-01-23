@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..core.database import get_db
@@ -47,7 +47,6 @@ def list_all_history(limit: int = 250, db: Session = Depends(get_db)):
     return history
 
 
-@router.post("/", response_model=TaskTemplateRead, status_code=status.HTTP_201_CREATED)
 def _merge_metadata(payload: TaskTemplateCreate | TaskTemplateUpdate, base: dict | None = None) -> dict:
     meta = dict(base or {})
     for key in [
@@ -64,7 +63,8 @@ def _merge_metadata(payload: TaskTemplateCreate | TaskTemplateUpdate, base: dict
     return meta
 
 
-def create_task(payload: TaskTemplateCreate, db: Session = Depends(get_db)):
+@router.post("/", response_model=TaskTemplateRead, status_code=status.HTTP_201_CREATED)
+def create_task(payload: TaskTemplateCreate = Body(..., embed=False), db: Session = Depends(get_db)):
     task = TaskTemplate(
         title=payload.title,
         description=payload.description,
@@ -80,7 +80,7 @@ def create_task(payload: TaskTemplateCreate, db: Session = Depends(get_db)):
 
 
 @router.patch("/{task_id}", response_model=TaskTemplateRead)
-def update_task(task_id: str, payload: TaskTemplateUpdate, db: Session = Depends(get_db)):
+def update_task(task_id: str, payload: TaskTemplateUpdate = Body(..., embed=False), db: Session = Depends(get_db)):
     task = db.get(TaskTemplate, task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
@@ -158,21 +158,28 @@ def _resolve_week(request: ScheduleRequest) -> tuple[date, date]:
     return week_start, week_end
 
 
+def _extract_recurrence(task: TaskTemplate) -> tuple[str, int, int]:
+    recurrence = task.recurrence or {}
+    mode = recurrence.get("mode") or "repeat"
+    cfg = recurrence.get("config") or {}
+    start_after = max(0, int(cfg.get("start_after_days", 0) or 0))
+    end_before = max(0, int(cfg.get("end_before_days", start_after) or start_after))
+    if end_before < start_after:
+        end_before = start_after
+    return mode, start_after, end_before
+
+
 def _classify_task(task: TaskTemplate, last_done: date | None, week_start: date, week_end: date) -> str:
-    meta = task.metadata_json or {}
-    min_days = meta.get("frequency_min_days")
-    max_days = meta.get("frequency_max_days")
+    mode, start_after, end_before = _extract_recurrence(task)
+    today = date.today()
 
-    # Defaults: if not provided, assume very flexible (due anytime) so we don't skip.
-    min_days = 0 if min_days is None else max(0, min_days)
-    max_days = 365 if max_days is None else max(1, max_days)
+    if mode == "repeat":
+        base = last_done or today
+    else:  # one_time
+        base = today
 
-    if last_done is None:
-        earliest = week_start
-        latest = week_end
-    else:
-        earliest = last_done + timedelta(days=min_days)
-        latest = last_done + timedelta(days=max_days)
+    earliest = base + timedelta(days=start_after)
+    latest = base + timedelta(days=end_before)
 
     if week_end < earliest or week_start > latest:
         return "skip"

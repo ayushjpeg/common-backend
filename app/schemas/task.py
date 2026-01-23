@@ -12,9 +12,21 @@ class TimeWindow(BaseModel):
     note: str | None = None
 
 
+class RecurrenceWindow(BaseModel):
+    start_after_days: int = Field(default=0, ge=0)
+    end_before_days: int = Field(default=0, ge=0)
+
+    def normalized(self) -> "RecurrenceWindow":
+        end = self.end_before_days
+        start = self.start_after_days
+        if end < start:
+            end = start
+        return RecurrenceWindow(start_after_days=start, end_before_days=end)
+
+
 class TaskRecurrence(BaseModel):
-    mode: str = Field(default="gap")
-    config: dict[str, Any] = Field(default_factory=dict)
+    mode: Literal["repeat", "one_time"] = Field(default="repeat")
+    config: RecurrenceWindow = Field(default_factory=RecurrenceWindow)
 
 
 class TaskTemplateBase(BaseModel):
