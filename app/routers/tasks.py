@@ -217,13 +217,11 @@ def _build_prompt(week_start: date, week_end: date, tasks: list[ScheduledTaskCan
         note = "must" if task.classification == "must" else "do_if_possible"
         start_after = task.start_after_days if task.start_after_days is not None else 0
         end_before = task.end_before_days if task.end_before_days is not None else start_after
+        preferred = f" | preferred window: {task.preferred_window}" if task.preferred_window else ""
+        descr = f" | description: {task.description}" if task.description else ""
         lines.append(
-            f"- {task.title} [{note} | mode={task.mode}] | {task.duration_minutes} min | schedule window {task.window_start.isoformat()} to {task.window_end.isoformat()} | allowed {start_after}-{end_before} days after last completion ({task.last_completed_at or 'never'}) | priority {task.priority} | importance {task.importance or 'n/a'} | category {task.category or 'n/a'}"
+            f"- {task.title} [{note} | mode={task.mode}] | {task.duration_minutes} min | schedule window {task.window_start.isoformat()} to {task.window_end.isoformat()} | allowed {start_after}-{end_before} days after last completion ({task.last_completed_at or 'never'}) | priority {task.priority}{preferred}{descr}"
         )
-        if task.preferred_windows:
-            lines.append("  preferred: " + "; ".join([f"{w.day or 'any'} {w.start_time or ''}-{w.end_time or ''}" for w in task.preferred_windows]))
-        if task.busy_windows:
-            lines.append("  avoid: " + "; ".join([f"{w.day or 'any'} {w.start_time or ''}-{w.end_time or ''}" for w in task.busy_windows]))
 
     lines.append(
         "Return a concise plan with concrete day/time for each scheduled task inside this week. Distribute repeat tasks per their chained windows, respect busy windows, keep times inside preferred dayparts when given, and avoid clustering everything on one day."
@@ -255,16 +253,13 @@ def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db)):
             start_after_days=start_after,
             end_before_days=end_before,
             last_completed_at=last_done,
-            preferred_windows=meta.get("preferred_windows") or [],
-            busy_windows=meta.get("busy_windows") or [],
-            importance=meta.get("importance"),
-            category=meta.get("category"),
+            description=task.description,
+            preferred_window=meta.get("window") or meta.get("preferred_window"),
         )
         candidates.append(candidate)
 
-    prompt = _build_prompt(week_start, week_end, candidates, request)
-
-    return SchedulePreviewResponse(week_start=week_start, week_end=week_end, prompt=prompt, tasks=candidates)
+    # Prompt is now owned/edited by frontend and stored separately; return empty to avoid confusion.
+    return SchedulePreviewResponse(week_start=week_start, week_end=week_end, prompt="", tasks=candidates)
 
 
 @router.post("/schedule/commit", response_model=ScheduleCommitResponse)

@@ -125,6 +125,7 @@ class ScheduleRequest(BaseModel):
 class ScheduledTaskCandidate(BaseModel):
     task_id: str
     title: str
+    description: str | None = None
     duration_minutes: int
     priority: str
     mode: Literal["repeat", "one_time"] = "repeat"
@@ -134,10 +135,7 @@ class ScheduledTaskCandidate(BaseModel):
     start_after_days: int | None = None
     end_before_days: int | None = None
     last_completed_at: datetime | None = None
-    preferred_windows: list[TimeWindow] = Field(default_factory=list)
-    busy_windows: list[TimeWindow] = Field(default_factory=list)
-    importance: str | None = None
-    category: str | None = None
+    preferred_window: str | None = None
 
 
 class SchedulePreviewResponse(BaseModel):
