@@ -169,6 +169,29 @@ def _extract_recurrence(task: TaskTemplate) -> tuple[str, int, int]:
     return mode, start_after, end_before
 
 
+def _generate_expected_dates(task: TaskTemplate, week_start: date, week_end: date, last_done: date | None) -> list[date]:
+    mode, start_after, end_before = _extract_recurrence(task)
+    dates: list[date] = []
+    today = date.today()
+    base = last_done or today
+
+    if mode == "repeat":
+        step = max(1, start_after or 1)
+        current = base + timedelta(days=start_after)
+        while current <= week_end:
+            if current >= week_start:
+                dates.append(current)
+            current = current + timedelta(days=step)
+    else:  # one_time
+        earliest = base + timedelta(days=start_after)
+        latest = base + timedelta(days=end_before)
+        candidate = max(earliest, week_start)
+        if candidate <= week_end and candidate <= latest:
+            dates.append(candidate)
+
+    return dates
+
+
 def _classify_task(task: TaskTemplate, last_done: date | None, week_start: date, week_end: date) -> str:
     mode, start_after, end_before = _extract_recurrence(task)
     today = date.today()
@@ -205,10 +228,12 @@ def _build_prompt(week_start: date, week_end: date, tasks: list[ScheduledTaskCan
         if task.classification == "skip":
             continue
         note = "(must)" if task.classification == "must" else "(do if possible)"
+        expected = f" expected on {', '.join([d.isoformat() for d in task.expected_dates])}" if task.expected_dates else ""
         lines.append(
-            f"- {task.title} {note} | {task.duration_minutes} min | window {task.window_start.isoformat()} to {task.window_end.isoformat()}"
+            f"- {task.title} {note} | {task.duration_minutes} min | window {task.window_start.isoformat()} to {task.window_end.isoformat()} {expected}"
         )
     lines.append("Return a day/time suggestion for each non-skip task within the week.")
+    lines.append("When recurrence mode is repeat, schedule multiple sessions across the week following the suggested dates above instead of stacking them on one day.")
     return "\n".join(lines)
 
 
@@ -222,6 +247,7 @@ def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db)):
         last_done = _get_last_completed_at(db, task.id)
         classification = _classify_task(task, last_done, week_start, week_end)
         meta = task.metadata_json or {}
+        expected_dates = _generate_expected_dates(task, week_start, week_end, last_done)
         candidate = ScheduledTaskCandidate(
             task_id=task.id,
             title=task.title,
@@ -237,6 +263,7 @@ def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db)):
             busy_windows=meta.get("busy_windows") or [],
             importance=meta.get("importance"),
             category=meta.get("category"),
+            expected_dates=expected_dates,
         )
         candidates.append(candidate)
 

@@ -137,6 +137,7 @@ class ScheduledTaskCandidate(BaseModel):
     busy_windows: list[TimeWindow] = Field(default_factory=list)
     importance: str | None = None
     category: str | None = None
+    expected_dates: list[date] = Field(default_factory=list)
 
 
 class SchedulePreviewResponse(BaseModel):
