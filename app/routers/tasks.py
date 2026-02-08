@@ -220,17 +220,47 @@ def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db)):
 
 @router.post("/schedule/commit", response_model=ScheduleCommitResponse)
 def commit_schedule(request: ScheduleCommitRequest, db: Session = Depends(get_db)):
+    # If plan is empty, clear scheduled slots that fall within the requested week range.
     if not request.plan:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan cannot be empty")
+        tasks = db.query(TaskTemplate).filter(TaskTemplate.is_archived.is_(False)).all()
+        changed = False
 
-    task_ids = {slot.task_id for slot in request.plan}
-    tasks = db.query(TaskTemplate).filter(TaskTemplate.id.in_(task_ids)).all()
+        for task in tasks:
+            meta = dict(task.metadata_json or {})
+            slots = meta.get("scheduled_slots") or []
+            keep: list[str] = []
+            for value in slots:
+                try:
+                    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                except ValueError:
+                    # Skip malformed slot
+                    continue
+                if request.week_start <= parsed.date() <= request.week_end:
+                    changed = True
+                    continue
+                keep.append(value)
+
+            if keep != slots:
+                meta["scheduled_slots"] = keep
+                task.metadata_json = meta
+
+        if changed:
+            db.commit()
+
+        return ScheduleCommitResponse(message="Plan cleared", stored=True, plan=[])
+
+    task_ids = [slot.task_id for slot in request.plan]
+    unique_task_ids = set(task_ids)
+    if len(unique_task_ids) != len(task_ids):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Each task can only be scheduled once per week.")
+
+    tasks = db.query(TaskTemplate).filter(TaskTemplate.id.in_(unique_task_ids)).all()
     found_ids = {task.id for task in tasks}
-    missing = task_ids - found_ids
+    missing = unique_task_ids - found_ids
     if missing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown task ids: {', '.join(sorted(missing))}")
 
-    slots_by_task: dict[str, list[str]] = {task_id: [] for task_id in task_ids}
+    slots_by_task: dict[str, list[str]] = {task_id: [] for task_id in unique_task_ids}
     for slot in request.plan:
         dt_value = datetime.combine(slot.scheduled_date, slot.scheduled_time or time(0, 0))
         slots_by_task.setdefault(slot.task_id, []).append(dt_value.isoformat())
