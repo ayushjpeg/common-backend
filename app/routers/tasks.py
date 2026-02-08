@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -219,12 +219,33 @@ def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/schedule/commit", response_model=ScheduleCommitResponse)
-def commit_schedule(request: ScheduleCommitRequest):
+def commit_schedule(request: ScheduleCommitRequest, db: Session = Depends(get_db)):
     if not request.plan:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan cannot be empty")
 
+    task_ids = {slot.task_id for slot in request.plan}
+    tasks = db.query(TaskTemplate).filter(TaskTemplate.id.in_(task_ids)).all()
+    found_ids = {task.id for task in tasks}
+    missing = task_ids - found_ids
+    if missing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown task ids: {', '.join(sorted(missing))}")
+
+    slots_by_task: dict[str, list[str]] = {task_id: [] for task_id in task_ids}
+    for slot in request.plan:
+        dt_value = datetime.combine(slot.scheduled_date, slot.scheduled_time or time(0, 0))
+        slots_by_task.setdefault(slot.task_id, []).append(dt_value.isoformat())
+
+    for task in tasks:
+        meta = dict(task.metadata_json or {})
+        scheduled = slots_by_task.get(task.id, [])
+        scheduled.sort()
+        meta["scheduled_slots"] = scheduled
+        task.metadata_json = meta
+
+    db.commit()
+
     return ScheduleCommitResponse(
-        message="Plan received; persistence not yet implemented",
-        stored=False,
+        message="Plan stored",
+        stored=True,
         plan=request.plan,
     )
