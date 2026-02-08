@@ -148,7 +148,6 @@ class ScheduledTaskSlot(BaseModel):
 class SchedulePreviewResponse(BaseModel):
     week_start: date
     week_end: date
-    prompt: str
     tasks: list[ScheduledTaskCandidate]
 
 
@@ -156,15 +155,9 @@ class ScheduleCommitRequest(BaseModel):
     week_start: date
     week_end: date
     plan: list[ScheduledTaskSlot]
-    ai_response: str | None = None
 
 
 class ScheduleCommitResponse(BaseModel):
     message: str
     stored: bool = False
     plan: list[ScheduledTaskSlot] = Field(default_factory=list)
-    ai_response: str | None = None
-
-
-class PromptConfig(BaseModel):
-    prompt: str

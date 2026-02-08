@@ -1,15 +1,12 @@
-from collections import defaultdict
-from datetime import date, datetime, time, timedelta
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..core.database import get_db
 from ..core.security import require_api_key
-from ..models.setting import AppSetting
 from ..models.task import TaskHistory, TaskTemplate
 from ..schemas.task import (
-    PromptConfig,
     ScheduleCommitRequest,
     ScheduleCommitResponse,
     SchedulePreviewResponse,
@@ -179,57 +176,15 @@ def _classify_task(task: TaskTemplate, last_done: date | None, week_start: date,
 
     if mode == "repeat":
         base = last_done or today
-    else:  # one_time
+    else:
         base = today
 
     earliest = base + timedelta(days=start_after)
     latest = base + timedelta(days=end_before)
-    # If the target week overlaps the allowed window, treat as must.
+
     if week_end >= earliest and week_start <= latest:
         return "must"
     return "skip"
-
-
-def _build_prompt(week_start: date, week_end: date, tasks: list[ScheduledTaskCandidate], request: ScheduleRequest) -> str:
-    lines: list[str] = []
-    lines.append("You are scheduling tasks for the upcoming week only. Do not place anything outside this range.")
-    lines.append(f"Week range: {week_start.isoformat()} to {week_end.isoformat()} (Saturday to Friday).")
-    lines.append("Recurrence rules:")
-    lines.append(
-        "- repeat: derive every occurrence that fits in this week by chaining the window from the last completion (or today if none). Each occurrence must be >= start_after_days and <= end_before_days after the previous one. Keep chaining until you pass the week end."
-    )
-    lines.append("- one_time: place exactly once within its allowed window; if no overlap with the week, skip and explain.")
-    lines.append(
-        "If a task's allowed window does not intersect this week, skip it and state `skipped: reason`. Prefer preferred windows (e.g., mornings) and avoid busy windows when picking exact times."
-    )
-
-    if request.user_busy:
-        lines.append("Busy windows to avoid:")
-        for window in request.user_busy:
-            lines.append(f"- {window.day or 'any'} {window.start_time or ''}-{window.end_time or ''} ({window.note or 'busy'})")
-    if request.user_preferences:
-        lines.append("Preferred windows:")
-        for window in request.user_preferences:
-            lines.append(f"- {window.day or 'any'} {window.start_time or ''}-{window.end_time or ''} ({window.note or window.kind or 'preferred'})")
-
-    lines.append("Tasks to consider (only schedule if the allowed window intersects this week):")
-    for task in tasks:
-        if task.classification == "skip":
-            continue
-        note = "must" if task.classification == "must" else "do_if_possible"
-        start_after = task.start_after_days if task.start_after_days is not None else 0
-        end_before = task.end_before_days if task.end_before_days is not None else start_after
-        preferred = f" | preferred window: {task.preferred_window}" if task.preferred_window else ""
-        descr = f" | description: {task.description}" if task.description else ""
-        lines.append(
-            f"- {task.title} [{note} | mode={task.mode}] | {task.duration_minutes} min | schedule window {task.window_start.isoformat()} to {task.window_end.isoformat()} | allowed {start_after}-{end_before} days after last completion ({task.last_completed_at or 'never'}) | priority {task.priority}{preferred}{descr}"
-        )
-
-    lines.append(
-        "Return a concise plan with concrete day/time for each scheduled task inside this week. Distribute repeat tasks per their chained windows, respect busy windows, keep times inside preferred dayparts when given, and avoid clustering everything on one day."
-    )
-    lines.append("If you skip a task, state `skipped: <reason>` so the user understands why.")
-    return "\n".join(lines)
 
 
 @router.post("/schedule/preview", response_model=SchedulePreviewResponse)
@@ -260,77 +215,16 @@ def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db)):
         )
         candidates.append(candidate)
 
-    # Prompt is now owned/edited by frontend and stored separately; return empty to avoid confusion.
-    return SchedulePreviewResponse(week_start=week_start, week_end=week_end, prompt="", tasks=candidates)
+    return SchedulePreviewResponse(week_start=week_start, week_end=week_end, tasks=candidates)
 
 
 @router.post("/schedule/commit", response_model=ScheduleCommitResponse)
-def commit_schedule(request: ScheduleCommitRequest, db: Session = Depends(get_db)):
+def commit_schedule(request: ScheduleCommitRequest):
     if not request.plan:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan cannot be empty")
 
-    task_ids = {slot.task_id for slot in request.plan}
-    tasks = db.query(TaskTemplate).filter(TaskTemplate.id.in_(task_ids)).all()
-    found_ids = {task.id for task in tasks}
-    missing = sorted(task_ids - found_ids)
-    if missing:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown task ids: {', '.join(missing)}")
-
-    def _slot_datetime(slot: ScheduledTaskSlot) -> datetime:
-        scheduled_time = slot.scheduled_time or time(hour=9, minute=0)
-        return datetime.combine(slot.scheduled_date, scheduled_time)
-
-    plan_by_task: dict[str, list[datetime]] = defaultdict(list)
-    last_completed_by_task: dict[str, datetime] = {}
-    for slot in request.plan:
-        plan_by_task[slot.task_id].append(_slot_datetime(slot))
-        if slot.last_completed_at:
-            last_completed_by_task[slot.task_id] = slot.last_completed_at
-
-    stored_any = False
-    for task in tasks:
-        slots = sorted(plan_by_task.get(task.id, []))
-        meta = dict(task.metadata_json or {})
-        meta["scheduled_slots"] = [slot.isoformat() for slot in slots]
-        meta["nextDueDate"] = slots[0].date().isoformat() if slots else None
-        if task.id in last_completed_by_task:
-            meta["lastCompletedAt"] = last_completed_by_task[task.id].isoformat()
-        task.metadata_json = meta
-        stored_any = stored_any or bool(slots)
-
-    db.commit()
     return ScheduleCommitResponse(
-        message="Plan stored in task metadata",
-        stored=stored_any,
+        message="Plan received; persistence not yet implemented",
+        stored=False,
         plan=request.plan,
-        ai_response=request.ai_response,
     )
-
-
-def _get_setting(db: Session, key: str) -> str:
-    record = db.get(AppSetting, key)
-    return record.value if record else ""
-
-
-def _set_setting(db: Session, key: str, value: str) -> str:
-    record = db.get(AppSetting, key)
-    if record:
-        record.value = value
-    else:
-        record = AppSetting(key=key, value=value)
-        db.add(record)
-    db.commit()
-    db.refresh(record)
-    return record.value
-
-
-@router.get("/prompt", response_model=PromptConfig)
-def get_prompt(db: Session = Depends(get_db)):
-    value = _get_setting(db, "tasks_prompt")
-    return PromptConfig(prompt=value)
-
-
-@router.put("/prompt", response_model=PromptConfig)
-def set_prompt(payload: PromptConfig, db: Session = Depends(get_db)):
-    value = _set_setting(db, "tasks_prompt", payload.prompt)
-    return PromptConfig(prompt=value)
