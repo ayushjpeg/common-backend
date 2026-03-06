@@ -222,8 +222,6 @@ def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db)):
 def commit_schedule(request: ScheduleCommitRequest, db: Session = Depends(get_db)):
     task_ids = [slot.task_id for slot in request.plan]
     unique_task_ids = set(task_ids)
-    if len(unique_task_ids) != len(task_ids):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Each task can only be scheduled once per week.")
 
     if unique_task_ids:
         known = db.query(TaskTemplate).filter(TaskTemplate.id.in_(unique_task_ids)).all()
