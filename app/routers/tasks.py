@@ -220,62 +220,61 @@ def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db)):
 
 @router.post("/schedule/commit", response_model=ScheduleCommitResponse)
 def commit_schedule(request: ScheduleCommitRequest, db: Session = Depends(get_db)):
-    # If plan is empty, clear scheduled slots that fall within the requested week range.
-    if not request.plan:
-        tasks = db.query(TaskTemplate).filter(TaskTemplate.is_archived.is_(False)).all()
-        changed = False
-
-        for task in tasks:
-            meta = dict(task.metadata_json or {})
-            slots = meta.get("scheduled_slots") or []
-            keep: list[str] = []
-            for value in slots:
-                try:
-                    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-                except ValueError:
-                    # Skip malformed slot
-                    continue
-                if request.week_start <= parsed.date() <= request.week_end:
-                    changed = True
-                    continue
-                keep.append(value)
-
-            if keep != slots:
-                meta["scheduled_slots"] = keep
-                task.metadata_json = meta
-
-        if changed:
-            db.commit()
-
-        return ScheduleCommitResponse(message="Plan cleared", stored=True, plan=[])
-
     task_ids = [slot.task_id for slot in request.plan]
     unique_task_ids = set(task_ids)
     if len(unique_task_ids) != len(task_ids):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Each task can only be scheduled once per week.")
 
-    tasks = db.query(TaskTemplate).filter(TaskTemplate.id.in_(unique_task_ids)).all()
-    found_ids = {task.id for task in tasks}
-    missing = unique_task_ids - found_ids
-    if missing:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown task ids: {', '.join(sorted(missing))}")
+    if unique_task_ids:
+        known = db.query(TaskTemplate).filter(TaskTemplate.id.in_(unique_task_ids)).all()
+        found_ids = {task.id for task in known}
+        missing = unique_task_ids - found_ids
+        if missing:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown task ids: {', '.join(sorted(missing))}")
 
+    # Build incoming week plan by task id.
     slots_by_task: dict[str, list[str]] = {task_id: [] for task_id in unique_task_ids}
     for slot in request.plan:
         dt_value = datetime.combine(slot.scheduled_date, slot.scheduled_time or time(0, 0))
         slots_by_task.setdefault(slot.task_id, []).append(dt_value.isoformat())
 
+    for values in slots_by_task.values():
+        values.sort()
+
+    # Apply week-scoped overwrite: remove only slots in [week_start, week_end], preserve other weeks.
+    tasks = db.query(TaskTemplate).filter(TaskTemplate.is_archived.is_(False)).all()
+    changed = False
+
     for task in tasks:
         meta = dict(task.metadata_json or {})
-        scheduled = slots_by_task.get(task.id, [])
-        scheduled.sort()
-        meta["scheduled_slots"] = scheduled
-        task.metadata_json = meta
+        slots = meta.get("scheduled_slots") or []
 
-    db.commit()
+        keep_outside_week: list[str] = []
+        for value in slots:
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                # Preserve malformed values instead of dropping user data unexpectedly.
+                keep_outside_week.append(value)
+                continue
+
+            if request.week_start <= parsed.date() <= request.week_end:
+                continue
+            keep_outside_week.append(value)
+
+        merged = [*keep_outside_week, *(slots_by_task.get(task.id, []))]
+        merged.sort()
+
+        if merged != slots:
+            meta["scheduled_slots"] = merged
+            task.metadata_json = meta
+            changed = True
+
+    if changed:
+        db.commit()
 
     return ScheduleCommitResponse(
-        message="Plan stored",
+        message="Plan cleared" if not request.plan else "Plan stored",
         stored=True,
         plan=request.plan,
     )
