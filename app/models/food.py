@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Column, Date, DateTime, Float, ForeignKey, JSON, String, Text
 from sqlalchemy.orm import relationship
 
 from ..core.database import Base
@@ -16,6 +16,12 @@ class MealEntry(Base):
     calories = Column(Float, nullable=True)
     tags = Column(JSON, default=list)
     consumed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    meal_slot = Column(String(64), nullable=False, default="Breakfast")
+    recipe = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    ingredients = Column(JSON, default=list)
+    last_made = Column(Date, nullable=True)
+    image_url = Column(String(512), nullable=True)
 
     images = relationship("FoodImage", back_populates="meal", cascade="all, delete-orphan")
 
@@ -28,5 +34,7 @@ class FoodImage(Base):
     file_path = Column(String(512), nullable=False)
     media_id = Column(String(36), ForeignKey("media_assets.id", ondelete="CASCADE"), nullable=True)
     uploaded_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    recorded_at = Column(Date, nullable=True)
+    caption = Column(Text, nullable=True)
 
     meal = relationship("MealEntry", back_populates="images")
