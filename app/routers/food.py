@@ -125,12 +125,13 @@ def list_meals(db: Session = Depends(get_db)):
 
 @router.post("/meals", response_model=MealEntryRead, status_code=status.HTTP_201_CREATED)
 def create_meal(payload: MealEntryCreate, db: Session = Depends(get_db)):
+    ingredients = [item.model_dump() for item in payload.ingredients] if payload.ingredients else []
     meal = MealEntry(
         title=payload.name,
         meal_slot=payload.meal,
         recipe=payload.recipe,
         notes=payload.notes,
-        ingredients=payload.ingredients or [],
+        ingredients=ingredients,
         last_made=payload.last_made,
         image_url=payload.image_url,
         consumed_at=datetime.utcnow(),
@@ -166,7 +167,7 @@ def update_meal(meal_id: str, payload: MealEntryUpdate, db: Session = Depends(ge
     if "notes" in updates:
         meal.notes = updates["notes"]
     if "ingredients" in updates and updates["ingredients"] is not None:
-        meal.ingredients = updates["ingredients"]
+        meal.ingredients = [item.model_dump() for item in updates["ingredients"]]
     if "last_made" in updates:
         meal.last_made = updates["last_made"]
     if "image_url" in updates and updates["image_url"]:
