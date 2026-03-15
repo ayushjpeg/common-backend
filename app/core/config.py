@@ -28,7 +28,6 @@ class Settings(BaseSettings):
     media_root: Path = Path("./storage")
     media_base_url: str | None = None
     allowed_origins: list[str] | str = Field(default_factory=lambda: _DEFAULT_ORIGINS.copy())
-    api_key: str = "super-secret-key"
 
     @field_validator("allowed_origins", mode="before")
     @classmethod
