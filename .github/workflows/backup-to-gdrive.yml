@@ -1,0 +1,31 @@
+name: Backup Database To Google Drive
+
+on:
+  schedule:
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: [self-hosted, linux]
+    env:
+      APP_DATABASE_URL: ${{ secrets.APP_DATABASE_URL }}
+      RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG }}
+      RCLONE_REMOTE: gdrive
+      RCLONE_DESTINATION: postgres-backups/task_ops
+      BACKUP_RETENTION_DAYS: '7'
+      VERIFY_REMOTE: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install rclone if missing
+        run: |
+          if ! command -v rclone >/dev/null 2>&1; then
+            curl https://rclone.org/install.sh | sudo bash
+          fi
+
+      - name: Run database backup
+        run: |
+          chmod +x scripts/backup_to_gdrive.sh
+          ./scripts/backup_to_gdrive.sh

@@ -68,49 +68,48 @@ When deploying through GitHub Actions on a self-hosted runner, set `APP_DATABASE
 
 Uploads are saved under `APP_MEDIA_ROOT` (defaults to `backend/storage`). Each owner type (food, cctv, etc.) gets its own subfolder. In production, point `APP_MEDIA_ROOT` to a persistent path mounted from your Linux server or swap the implementation for S3/MinIO.
 
-## Nightly backup to Aiven
+## Nightly database backup to Google Drive
 
-If you want the database backup workflow to live with this project, use the host-run script in `scripts/backup_to_aiven.sh`. This keeps backup logic inside the `common-backend` repo without embedding a scheduler in the FastAPI process.
+If you want the backup workflow to live entirely inside this project and use GitHub secrets instead of a local env file, use:
 
-1. Copy the environment template and fill in your credentials.
+- `scripts/backup_to_gdrive.sh`
+- `.github/workflows/backup-to-gdrive.yml`
 
-```bash
-cd common-backend
-cp scripts/backup_to_aiven.env.example scripts/backup_to_aiven.env
-chmod 600 scripts/backup_to_aiven.env
-```
+The workflow runs nightly on your self-hosted Linux runner and uses the same `APP_DATABASE_URL` secret you already use for deployment.
 
-2. Review `scripts/backup_to_aiven.env` and set:
+Required GitHub secrets:
 
-```bash
-LOCAL_HOST=localhost
-LOCAL_PORT=5432
-LOCAL_DB=task_ops
-LOCAL_USER=task_user
-LOCAL_PASSWORD=...
+1. `APP_DATABASE_URL`
 
-AIVEN_HOST=...
-AIVEN_PORT=...
-AIVEN_DB=...
-AIVEN_USER=...
-AIVEN_PASSWORD=...
-AIVEN_SSLMODE=require
-```
+Use the same value already configured for deployment. The backup script normalizes the SQLAlchemy URL format and converts `host.docker.internal` to `localhost` so `pg_dump` works from the host runner.
 
-3. Make the script executable and test it manually.
+2. `RCLONE_CONFIG`
+
+Store the full contents of your `rclone.conf` file as a GitHub secret. To create it on the server:
 
 ```bash
-chmod +x scripts/backup_to_aiven.sh
-./scripts/backup_to_aiven.sh
+rclone config
+cat ~/.config/rclone/rclone.conf
 ```
 
-4. Add a host cron entry on your Ubuntu server.
+Copy that file content into the `RCLONE_CONFIG` GitHub secret.
 
-```cron
-30 2 * * * cd /path/to/common-backend && ./scripts/backup_to_aiven.sh >> /var/log/common-backend-db-backup.log 2>&1
+Default Google Drive target used by the workflow:
+
+```text
+remote: gdrive
+folder: postgres-backups/task_ops
 ```
 
-This job performs a local `pg_dump`, restores that dump into the Aiven PostgreSQL database, and removes local dump files older than `BACKUP_RETENTION_DAYS`.
+The scheduled run is currently:
+
+```text
+30 2 * * *
+```
+
+If you want to test it immediately, trigger the `Backup Database To Google Drive` workflow manually with `workflow_dispatch`.
+
+This job performs a `pg_dump`, uploads the dump file to Google Drive through `rclone`, verifies the remote upload, and removes old local dump files from the runner workspace.
 
 Important: this backs up PostgreSQL data only. It does not back up media files under `APP_MEDIA_ROOT`.
 
