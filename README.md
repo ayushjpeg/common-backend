@@ -83,7 +83,7 @@ Required GitHub secrets:
 
 Use the same value already configured for deployment. The backup script normalizes the SQLAlchemy URL format and converts `host.docker.internal` to `localhost` so `pg_dump` works from the host runner.
 
-2. `RCLONE_CONFIG_CONTENT`
+2. `RCLONE_CONFIG`
 
 Store the full contents of your `rclone.conf` file as a GitHub secret. To create it on the server:
 
@@ -92,7 +92,7 @@ rclone config
 cat ~/.config/rclone/rclone.conf
 ```
 
-Copy that file content into the `RCLONE_CONFIG_CONTENT` GitHub secret.
+Copy that file content into the `RCLONE_CONFIG` GitHub secret.
 
 Default Google Drive target used by the workflow:
 

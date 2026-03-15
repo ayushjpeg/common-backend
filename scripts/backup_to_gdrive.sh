@@ -3,7 +3,7 @@ set -euo pipefail
 
 required_vars=(
   APP_DATABASE_URL
-  RCLONE_CONFIG_CONTENT
+  RCLONE_CONFIG
 )
 
 for var_name in "${required_vars[@]}"; do
@@ -32,7 +32,9 @@ db_url="${db_url/host.docker.internal/localhost}"
 rclone_config_dir="${RCLONE_CONFIG_DIR:-$HOME/.config/rclone}"
 rclone_config_file="$rclone_config_dir/rclone.conf"
 mkdir -p "$rclone_config_dir"
-printf '%s\n' "$RCLONE_CONFIG_CONTENT" > "$rclone_config_file"
+RCLONE_CONFIG_BLOB="$RCLONE_CONFIG"
+unset RCLONE_CONFIG
+printf '%s\n' "$RCLONE_CONFIG_BLOB" > "$rclone_config_file"
 chmod 600 "$rclone_config_file"
 
 mkdir -p "$BACKUP_DIR"
