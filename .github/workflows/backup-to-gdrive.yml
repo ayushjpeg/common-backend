@@ -21,11 +21,36 @@ jobs:
 
       - name: Install rclone if missing
         run: |
+          export PATH="$HOME/.local/bin:$PATH"
           if ! command -v rclone >/dev/null 2>&1; then
-            curl https://rclone.org/install.sh | sudo bash
+            python3 - <<'PY'
+          from pathlib import Path
+          from urllib.request import urlretrieve
+          import shutil
+          import stat
+          import tempfile
+          import zipfile
+
+          url = "https://downloads.rclone.org/rclone-current-linux-amd64.zip"
+          target_dir = Path.home() / ".local" / "bin"
+          target_dir.mkdir(parents=True, exist_ok=True)
+
+          with tempfile.TemporaryDirectory() as tmp_dir:
+            archive = Path(tmp_dir) / "rclone.zip"
+            urlretrieve(url, archive)
+            with zipfile.ZipFile(archive) as zf:
+              binary_name = next(name for name in zf.namelist() if name.endswith('/rclone'))
+              extracted = Path(tmp_dir) / "rclone"
+              with zf.open(binary_name) as src, extracted.open('wb') as dst:
+                shutil.copyfileobj(src, dst)
+            extracted.chmod(extracted.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            shutil.copy2(extracted, target_dir / "rclone")
+          PY
           fi
+          rclone version
 
       - name: Run database backup
         run: |
+          export PATH="$HOME/.local/bin:$PATH"
           chmod +x scripts/backup_to_gdrive.sh
           ./scripts/backup_to_gdrive.sh
