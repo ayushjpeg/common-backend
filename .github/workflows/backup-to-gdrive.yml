@@ -10,7 +10,7 @@ jobs:
     runs-on: [self-hosted, linux]
     env:
       APP_DATABASE_URL: ${{ secrets.APP_DATABASE_URL }}
-      RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG }}
+      RCLONE_CONFIG_CONTENT: ${{ secrets.RCLONE_CONFIG_CONTENT }}
       RCLONE_REMOTE: gdrive
       RCLONE_DESTINATION: postgres-backups/task_ops
       BACKUP_RETENTION_DAYS: '7'
