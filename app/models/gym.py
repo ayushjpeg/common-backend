@@ -11,6 +11,7 @@ class GymExercise(Base):
     __tablename__ = "gym_exercises"
 
     id = Column(String(64), primary_key=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     name = Column(String(255), nullable=False)
     equipment = Column(String(255), nullable=True)
     primary_muscle = Column(String(64), nullable=True)
@@ -45,6 +46,7 @@ class GymDayAssignment(Base):
     __tablename__ = "gym_day_assignments"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     day_key = Column(String(16), nullable=False, index=True)
     slot_id = Column(String(64), nullable=False)
     slot_name = Column(String(255), nullable=False)
@@ -64,6 +66,7 @@ class GymExerciseHistory(Base):
     __tablename__ = "gym_exercise_history"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     exercise_id = Column(String(64), ForeignKey("gym_exercises.id", ondelete="CASCADE"), nullable=False, index=True)
     recorded_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     day_key = Column(String(16), nullable=True)

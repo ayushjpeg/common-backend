@@ -6,3 +6,5 @@ pydantic==2.8.2
 pydantic-settings==2.4.0
 python-multipart==0.0.9
 alembic==1.13.2
+PyJWT==2.10.1
+requests==2.32.3

@@ -3,8 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import get_settings
-from .routers import cctv, food, gym, health, media, tasks
-from .services.gym_seed import seed_gym_defaults
+from .routers import auth, cctv, food, gym, health, media, tasks
 
 settings = get_settings()
 
@@ -19,6 +18,7 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(tasks.router, prefix=settings.api_prefix)
 app.include_router(food.router, prefix=settings.api_prefix)
 app.include_router(gym.router, prefix=settings.api_prefix)
@@ -26,8 +26,3 @@ app.include_router(cctv.router, prefix=settings.api_prefix)
 app.include_router(media.router, prefix=settings.api_prefix)
 
 app.mount("/media", StaticFiles(directory=settings.resolved_media_root), name="media")
-
-
-@app.on_event("startup")
-def _prime_seed_data() -> None:
-    seed_gym_defaults()

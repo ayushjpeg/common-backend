@@ -11,6 +11,7 @@ class TaskTemplate(Base):
     __tablename__ = "task_templates"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     duration_minutes = Column(Integer, nullable=False, default=30)
@@ -28,6 +29,7 @@ class TaskHistory(Base):
     __tablename__ = "task_history"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     task_id = Column(String(36), ForeignKey("task_templates.id", ondelete="CASCADE"), nullable=False)
     completed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     duration_minutes = Column(Integer, nullable=False)

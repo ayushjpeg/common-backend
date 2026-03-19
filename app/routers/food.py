@@ -5,9 +5,10 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile, s
 from sqlalchemy.orm import Session, selectinload
 
 from ..core.database import get_db
-from ..core.security import require_api_key
+from ..core.security import get_current_user, require_api_key
 from ..models.food import FoodImage, MealEntry
 from ..models.media_asset import MediaAsset
+from ..models.user import User
 from ..schemas.food import FoodImageRead, MealEntryCreate, MealEntryRead, MealEntryUpdate, PhotoCreate
 from ..services.media_storage import build_public_url, get_media_storage
 
@@ -51,11 +52,11 @@ def _serialize_meal(meal: MealEntry) -> MealEntryRead:
     return MealEntryRead.model_validate(payload)
 
 
-def _load_meal(db: Session, meal_id: str) -> MealEntry:
+def _load_meal(db: Session, meal_id: str, user_id: str) -> MealEntry:
     meal = (
         db.query(MealEntry)
         .options(selectinload(MealEntry.images))
-        .filter(MealEntry.id == meal_id)
+        .filter(MealEntry.id == meal_id, MealEntry.user_id == user_id)
         .first()
     )
     if not meal:
@@ -94,6 +95,7 @@ def _persist_photo(meal: MealEntry, payload: PhotoCreate, db: Session, mime_type
         media_id = media.id
 
     image = FoodImage(
+        user_id=meal.user_id,
         meal_id=meal.id,
         file_path=file_path_str,
         media_id=media_id,
@@ -113,10 +115,11 @@ def _persist_photo(meal: MealEntry, payload: PhotoCreate, db: Session, mime_type
 
 
 @router.get("/meals", response_model=list[MealEntryRead])
-def list_meals(db: Session = Depends(get_db)):
+def list_meals(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     meals = (
         db.query(MealEntry)
         .options(selectinload(MealEntry.images))
+        .filter(MealEntry.user_id == current_user.id)
         .order_by(MealEntry.last_made.desc().nullslast(), MealEntry.consumed_at.desc())
         .all()
     )
@@ -124,9 +127,10 @@ def list_meals(db: Session = Depends(get_db)):
 
 
 @router.post("/meals", response_model=MealEntryRead, status_code=status.HTTP_201_CREATED)
-def create_meal(payload: MealEntryCreate, db: Session = Depends(get_db)):
+def create_meal(payload: MealEntryCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     ingredients = [item.model_dump() for item in payload.ingredients] if payload.ingredients else []
     meal = MealEntry(
+        user_id=current_user.id,
         title=payload.name,
         meal_slot=payload.meal,
         recipe=payload.recipe,
@@ -148,14 +152,14 @@ def create_meal(payload: MealEntryCreate, db: Session = Depends(get_db)):
             caption=None,
         )
         _persist_photo(meal, photo_payload, db)
-        meal = _load_meal(db, meal.id)
+        meal = _load_meal(db, meal.id, current_user.id)
 
     return _serialize_meal(meal)
 
 
 @router.patch("/meals/{meal_id}", response_model=MealEntryRead)
-def update_meal(meal_id: str, payload: MealEntryUpdate, db: Session = Depends(get_db)):
-    meal = _load_meal(db, meal_id)
+def update_meal(meal_id: str, payload: MealEntryUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    meal = _load_meal(db, meal_id, current_user.id)
 
     updates = payload.model_dump(exclude_unset=True)
     if "name" in updates:
@@ -184,14 +188,14 @@ def update_meal(meal_id: str, payload: MealEntryUpdate, db: Session = Depends(ge
             caption=None,
         )
         _persist_photo(meal, photo_payload, db)
-        meal = _load_meal(db, meal.id)
+        meal = _load_meal(db, meal.id, current_user.id)
 
     return _serialize_meal(meal)
 
 
 @router.delete("/meals/{meal_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_meal(meal_id: str, db: Session = Depends(get_db)):
-    meal = db.get(MealEntry, meal_id)
+def delete_meal(meal_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    meal = db.query(MealEntry).filter(MealEntry.id == meal_id, MealEntry.user_id == current_user.id).first()
     if not meal:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meal not found")
     db.delete(meal)
@@ -199,16 +203,16 @@ def delete_meal(meal_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/meals/{meal_id}/photos", response_model=MealEntryRead, status_code=status.HTTP_201_CREATED)
-def add_photo(meal_id: str, payload: PhotoCreate = Body(...), db: Session = Depends(get_db)):
-    meal = _load_meal(db, meal_id)
+def add_photo(meal_id: str, payload: PhotoCreate = Body(...), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    meal = _load_meal(db, meal_id, current_user.id)
     _persist_photo(meal, payload, db)
-    meal = _load_meal(db, meal.id)
+    meal = _load_meal(db, meal.id, current_user.id)
     return _serialize_meal(meal)
 
 
 @router.post("/meals/{meal_id}/images", response_model=MealEntryRead, status_code=status.HTTP_201_CREATED)
-async def upload_meal_image(meal_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    meal = _load_meal(db, meal_id)
+async def upload_meal_image(meal_id: str, file: UploadFile = File(...), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    meal = _load_meal(db, meal_id, current_user.id)
 
     storage = get_media_storage()
     dest_path = storage.save_upload("food", file)
@@ -220,5 +224,5 @@ async def upload_meal_image(meal_id: str, file: UploadFile = File(...), db: Sess
     )
     _persist_photo(meal, photo, db, mime_type_hint=file.content_type)
 
-    meal = _load_meal(db, meal.id)
+    meal = _load_meal(db, meal.id, current_user.id)
     return _serialize_meal(meal)

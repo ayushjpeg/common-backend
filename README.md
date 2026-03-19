@@ -44,6 +44,11 @@ Create a `.env` file in the project root (values below are defaults):
 APP_DATABASE_URL=postgresql+psycopg2://task_user:task_password@localhost:5432/task_ops
 APP_MEDIA_ROOT=./storage
 APP_ALLOWED_ORIGINS=["http://localhost:8006","https://tasks.ayux.in"]
+APP_PUBLIC_BASE_URL=https://common-backend.ayux.in
+APP_AUTH_SECRET_KEY=replace-with-a-random-secret
+APP_GOOGLE_CLIENT_ID=
+APP_GOOGLE_CLIENT_SECRET=
+APP_AUTH_COOKIE_DOMAIN=.ayux.in
 ```
 
 3. **Run migrations**
@@ -63,6 +68,40 @@ The API will now respond at `http://localhost:8007/api/...`.
 > **Note:** Alembic migrations will create the database *schema*, but PostgreSQL itself must already be running. Create the `task_ops` database (or update `APP_DATABASE_URL`) before running `alembic upgrade head`.
 
 When deploying through GitHub Actions on a self-hosted runner, set `APP_DATABASE_URL` to use `host.docker.internal` (e.g., `postgresql+psycopg2://task_user:task_password@host.docker.internal:5432/task_ops`). The workflow adds that host mapping so containers can reach the host OS database.
+
+## Google authentication
+
+The backend now owns authentication for Food, Gym, and Tasks. Frontends redirect users to the backend's Google OAuth flow, and the backend returns a signed session cookie scoped for your `*.ayux.in` apps.
+
+Required settings:
+
+- `APP_PUBLIC_BASE_URL`: public HTTPS URL for the backend, for example `https://common-backend.ayux.in`
+- `APP_AUTH_SECRET_KEY`: long random string used to sign session and OAuth state tokens
+- `APP_GOOGLE_CLIENT_ID`: Google OAuth web application client ID
+- `APP_GOOGLE_CLIENT_SECRET`: matching Google OAuth client secret
+- `APP_AUTH_COOKIE_DOMAIN`: cookie domain, usually `.ayux.in`
+
+Google Cloud Console setup:
+
+1. Create an OAuth 2.0 Web Application credential.
+2. Add these JavaScript origins:
+  - `https://food.ayux.in`
+  - `https://gym.ayux.in`
+  - `https://tasks.ayux.in`
+  - `https://common-backend.ayux.in`
+3. Add this redirect URI:
+  - `https://common-backend.ayux.in/api/auth/google/callback`
+
+Production GitHub secrets needed by `.github/workflows/deploy.yml`:
+
+- `APP_DATABASE_URL`
+- `APP_ALLOWED_ORIGINS`
+- `APP_MEDIA_ROOT`
+- `APP_PUBLIC_BASE_URL`
+- `APP_AUTH_SECRET_KEY`
+- `APP_GOOGLE_CLIENT_ID`
+- `APP_GOOGLE_CLIENT_SECRET`
+- `APP_AUTH_COOKIE_DOMAIN`
 
 ## Media storage
 

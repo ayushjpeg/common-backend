@@ -4,7 +4,8 @@ from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..core.database import get_db
-from ..core.security import require_api_key
+from ..core.security import get_current_user, require_api_key
+from ..models.user import User
 from ..models.task import TaskHistory, TaskTemplate
 from ..schemas.task import (
     ScheduleCommitRequest,
@@ -24,18 +25,19 @@ router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=[Depends(requir
 
 
 @router.get("/", response_model=list[TaskTemplateRead])
-def list_tasks(include_archived: bool = False, db: Session = Depends(get_db)):
-    query = db.query(TaskTemplate)
+def list_tasks(include_archived: bool = False, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    query = db.query(TaskTemplate).filter(TaskTemplate.user_id == current_user.id)
     if not include_archived:
         query = query.filter(TaskTemplate.is_archived.is_(False))
     return query.order_by(TaskTemplate.created_at.desc()).all()
 
 
 @router.get("/history", response_model=list[TaskHistoryRead])
-def list_all_history(limit: int = 250, db: Session = Depends(get_db)):
+def list_all_history(limit: int = 250, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     records = (
         db.query(TaskHistory, TaskTemplate.title.label("task_title"))
         .join(TaskTemplate, TaskTemplate.id == TaskHistory.task_id)
+        .filter(TaskHistory.user_id == current_user.id, TaskTemplate.user_id == current_user.id)
         .order_by(TaskHistory.completed_at.desc())
         .limit(limit)
         .all()
@@ -65,8 +67,9 @@ def _merge_metadata(payload: TaskTemplateCreate | TaskTemplateUpdate, base: dict
 
 
 @router.post("/", response_model=TaskTemplateRead, status_code=status.HTTP_201_CREATED)
-def create_task(payload: TaskTemplateCreate = Body(..., embed=False), db: Session = Depends(get_db)):
+def create_task(payload: TaskTemplateCreate = Body(..., embed=False), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     task = TaskTemplate(
+        user_id=current_user.id,
         title=payload.title,
         description=payload.description,
         duration_minutes=payload.duration_minutes,
@@ -81,8 +84,8 @@ def create_task(payload: TaskTemplateCreate = Body(..., embed=False), db: Sessio
 
 
 @router.patch("/{task_id}", response_model=TaskTemplateRead)
-def update_task(task_id: str, payload: TaskTemplateUpdate = Body(..., embed=False), db: Session = Depends(get_db)):
-    task = db.get(TaskTemplate, task_id)
+def update_task(task_id: str, payload: TaskTemplateUpdate = Body(..., embed=False), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    task = db.query(TaskTemplate).filter(TaskTemplate.id == task_id, TaskTemplate.user_id == current_user.id).first()
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
 
@@ -101,8 +104,8 @@ def update_task(task_id: str, payload: TaskTemplateUpdate = Body(..., embed=Fals
 
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_task(task_id: str, db: Session = Depends(get_db)):
-    task = db.get(TaskTemplate, task_id)
+def delete_task(task_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    task = db.query(TaskTemplate).filter(TaskTemplate.id == task_id, TaskTemplate.user_id == current_user.id).first()
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     db.delete(task)
@@ -110,13 +113,13 @@ def delete_task(task_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{task_id}/history", response_model=list[TaskHistoryRead])
-def list_history(task_id: str, db: Session = Depends(get_db)):
-    task = db.get(TaskTemplate, task_id)
+def list_history(task_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    task = db.query(TaskTemplate).filter(TaskTemplate.id == task_id, TaskTemplate.user_id == current_user.id).first()
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     records = (
         db.query(TaskHistory)
-        .filter(TaskHistory.task_id == task_id)
+        .filter(TaskHistory.task_id == task_id, TaskHistory.user_id == current_user.id)
         .order_by(TaskHistory.completed_at.desc())
         .all()
     )
@@ -129,11 +132,11 @@ def list_history(task_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{task_id}/history", response_model=TaskHistoryRead, status_code=status.HTTP_201_CREATED)
-def add_history(task_id: str, record: TaskHistoryCreate, db: Session = Depends(get_db)):
-    task = db.get(TaskTemplate, task_id)
+def add_history(task_id: str, record: TaskHistoryCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    task = db.query(TaskTemplate).filter(TaskTemplate.id == task_id, TaskTemplate.user_id == current_user.id).first()
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    history = TaskHistory(task_id=task_id, **record.model_dump())
+    history = TaskHistory(task_id=task_id, user_id=current_user.id, **record.model_dump())
     db.add(history)
     db.commit()
     db.refresh(history)
@@ -142,10 +145,10 @@ def add_history(task_id: str, record: TaskHistoryCreate, db: Session = Depends(g
     return payload
 
 
-def _get_last_completed_at(db: Session, task_id: str) -> date | None:
+def _get_last_completed_at(db: Session, task_id: str, user_id: str) -> date | None:
     record = (
         db.query(TaskHistory.completed_at)
-        .filter(TaskHistory.task_id == task_id)
+        .filter(TaskHistory.task_id == task_id, TaskHistory.user_id == user_id)
         .order_by(TaskHistory.completed_at.desc())
         .first()
     )
@@ -188,13 +191,13 @@ def _classify_task(task: TaskTemplate, last_done: date | None, week_start: date,
 
 
 @router.post("/schedule/preview", response_model=SchedulePreviewResponse)
-def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db)):
+def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     week_start, week_end = _resolve_week(request)
-    tasks = db.query(TaskTemplate).filter(TaskTemplate.is_archived.is_(False)).all()
+    tasks = db.query(TaskTemplate).filter(TaskTemplate.user_id == current_user.id, TaskTemplate.is_archived.is_(False)).all()
 
     candidates: list[ScheduledTaskCandidate] = []
     for task in tasks:
-        last_done = _get_last_completed_at(db, task.id)
+        last_done = _get_last_completed_at(db, task.id, current_user.id)
         classification = _classify_task(task, last_done, week_start, week_end)
         meta = task.metadata_json or {}
         mode, start_after, end_before = _extract_recurrence(task)
@@ -219,12 +222,12 @@ def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/schedule/commit", response_model=ScheduleCommitResponse)
-def commit_schedule(request: ScheduleCommitRequest, db: Session = Depends(get_db)):
+def commit_schedule(request: ScheduleCommitRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     task_ids = [slot.task_id for slot in request.plan]
     unique_task_ids = set(task_ids)
 
     if unique_task_ids:
-        known = db.query(TaskTemplate).filter(TaskTemplate.id.in_(unique_task_ids)).all()
+        known = db.query(TaskTemplate).filter(TaskTemplate.user_id == current_user.id, TaskTemplate.id.in_(unique_task_ids)).all()
         found_ids = {task.id for task in known}
         missing = unique_task_ids - found_ids
         if missing:
@@ -240,7 +243,7 @@ def commit_schedule(request: ScheduleCommitRequest, db: Session = Depends(get_db
         values.sort()
 
     # Apply week-scoped overwrite: remove only slots in [week_start, week_end], preserve other weeks.
-    tasks = db.query(TaskTemplate).filter(TaskTemplate.is_archived.is_(False)).all()
+    tasks = db.query(TaskTemplate).filter(TaskTemplate.user_id == current_user.id, TaskTemplate.is_archived.is_(False)).all()
     changed = False
 
     for task in tasks:

@@ -1,1 +1,1 @@
-from . import task, food, gym, cctv, media_asset, setting  # noqa: F401
+from . import task, food, gym, cctv, media_asset, setting, user  # noqa: F401

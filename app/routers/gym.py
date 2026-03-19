@@ -7,8 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..core.database import get_db
-from ..core.security import require_api_key
+from ..core.security import get_current_user, require_api_key
 from ..models.gym import GymDayAssignment, GymExercise, GymExerciseHistory
+from ..models.user import User
 from ..schemas.gym import (
     GymBootstrapResponse,
     GymDayAssignmentRead,
@@ -19,7 +20,7 @@ from ..schemas.gym import (
     GymExerciseRead,
     GymExerciseUpdate,
 )
-from ..services.gym_seed import get_default_muscle_targets
+from ..services.gym_seed import ensure_user_gym_defaults, get_default_muscle_targets
 
 router = APIRouter(prefix="/gym", tags=["gym"], dependencies=[Depends(require_api_key)])
 
@@ -126,6 +127,7 @@ def _append_explicit_options(
     ranked: list[GymExercise],
     option_ids: list[str] | None,
     db: Session,
+    user_id: str,
 ) -> list[GymExercise]:
     if not option_ids:
         return ranked
@@ -133,7 +135,7 @@ def _append_explicit_options(
     for option_id in option_ids:
         if not option_id or option_id in existing_ids:
             continue
-        exercise = db.get(GymExercise, option_id)
+        exercise = db.query(GymExercise).filter(GymExercise.id == option_id, GymExercise.user_id == user_id).first()
         if not exercise or not exercise.is_active:
             continue
         ranked.append(exercise)
@@ -141,22 +143,22 @@ def _append_explicit_options(
     return ranked
 
 
-def _get_exercise_or_404(db: Session, exercise_id: str) -> GymExercise:
-    exercise = db.get(GymExercise, exercise_id)
+def _get_exercise_or_404(db: Session, user_id: str, exercise_id: str) -> GymExercise:
+    exercise = db.query(GymExercise).filter(GymExercise.id == exercise_id, GymExercise.user_id == user_id).first()
     if not exercise:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
     return exercise
 
 
-def _get_assignment_or_404(db: Session, assignment_id: str) -> GymDayAssignment:
-    assignment = db.get(GymDayAssignment, assignment_id)
+def _get_assignment_or_404(db: Session, user_id: str, assignment_id: str) -> GymDayAssignment:
+    assignment = db.query(GymDayAssignment).filter(GymDayAssignment.id == assignment_id, GymDayAssignment.user_id == user_id).first()
     if not assignment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
     return assignment
 
 
-def _get_history_or_404(db: Session, history_id: str) -> GymExerciseHistory:
-    history = db.get(GymExerciseHistory, history_id)
+def _get_history_or_404(db: Session, user_id: str, history_id: str) -> GymExerciseHistory:
+    history = db.query(GymExerciseHistory).filter(GymExerciseHistory.id == history_id, GymExerciseHistory.user_id == user_id).first()
     if not history:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="History entry not found")
     return history
@@ -181,15 +183,18 @@ def _exercise_to_read(exercise: GymExercise, latest: GymExerciseHistory | None) 
 
 
 @router.get("/bootstrap", response_model=GymBootstrapResponse)
-def bootstrap_gym(db: Session = Depends(get_db)):
+def bootstrap_gym(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    ensure_user_gym_defaults(db, current_user.id)
     assignments = (
         db.query(GymDayAssignment)
+        .filter(GymDayAssignment.user_id == current_user.id)
         .order_by(GymDayAssignment.day_key, GymDayAssignment.order_index)
         .all()
     )
-    exercises = db.query(GymExercise).order_by(GymExercise.name).all()
+    exercises = db.query(GymExercise).filter(GymExercise.user_id == current_user.id).order_by(GymExercise.name).all()
     history_entries = (
         db.query(GymExerciseHistory)
+        .filter(GymExerciseHistory.user_id == current_user.id)
         .order_by(GymExerciseHistory.recorded_at)
         .all()
     )
@@ -208,15 +213,16 @@ def bootstrap_gym(db: Session = Depends(get_db)):
         exercises=exercise_payload,
         assignments=assignment_payload,
         history=history_payload,
-        muscle_targets=get_default_muscle_targets(),
+        muscle_targets=(current_user.preferences_json or {}).get("gym_muscle_targets") or get_default_muscle_targets(),
     )
 
 
 @router.get("/exercises", response_model=list[GymExerciseRead])
-def list_exercises(db: Session = Depends(get_db)):
-    exercises = db.query(GymExercise).order_by(GymExercise.name).all()
+def list_exercises(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    exercises = db.query(GymExercise).filter(GymExercise.user_id == current_user.id).order_by(GymExercise.name).all()
     history_entries = (
         db.query(GymExerciseHistory)
+        .filter(GymExerciseHistory.user_id == current_user.id)
         .order_by(GymExerciseHistory.recorded_at.desc())
         .all()
     )
@@ -228,13 +234,15 @@ def list_exercises(db: Session = Depends(get_db)):
 
 
 @router.post("/exercises", response_model=GymExerciseRead, status_code=status.HTTP_201_CREATED)
-def create_exercise(payload: GymExerciseCreate, db: Session = Depends(get_db)):
+def create_exercise(payload: GymExerciseCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     exercise_id = payload.id or str(uuid.uuid4())
-    if db.get(GymExercise, exercise_id):
+    existing = db.query(GymExercise).filter(GymExercise.id == exercise_id, GymExercise.user_id == current_user.id).first()
+    if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Exercise already exists")
 
     exercise = GymExercise(
         id=exercise_id,
+        user_id=current_user.id,
         **payload.model_dump(exclude={"id"}, exclude_none=True),
     )
     db.add(exercise)
@@ -244,8 +252,8 @@ def create_exercise(payload: GymExerciseCreate, db: Session = Depends(get_db)):
 
 
 @router.patch("/exercises/{exercise_id}", response_model=GymExerciseRead)
-def update_exercise(exercise_id: str, payload: GymExerciseUpdate, db: Session = Depends(get_db)):
-    exercise = _get_exercise_or_404(db, exercise_id)
+def update_exercise(exercise_id: str, payload: GymExerciseUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    exercise = _get_exercise_or_404(db, current_user.id, exercise_id)
     update_data = payload.model_dump(exclude_none=True)
 
     if "extra_metadata" in update_data:
@@ -261,7 +269,7 @@ def update_exercise(exercise_id: str, payload: GymExerciseUpdate, db: Session = 
     db.refresh(exercise)
     latest = (
         db.query(GymExerciseHistory)
-        .filter(GymExerciseHistory.exercise_id == exercise.id)
+        .filter(GymExerciseHistory.exercise_id == exercise.id, GymExerciseHistory.user_id == current_user.id)
         .order_by(GymExerciseHistory.recorded_at.desc())
         .first()
     )
@@ -269,18 +277,18 @@ def update_exercise(exercise_id: str, payload: GymExerciseUpdate, db: Session = 
 
 
 @router.delete("/exercises/{exercise_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_exercise(exercise_id: str, db: Session = Depends(get_db)):
-    exercise = _get_exercise_or_404(db, exercise_id)
+def delete_exercise(exercise_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    exercise = _get_exercise_or_404(db, current_user.id, exercise_id)
     db.delete(exercise)
     db.commit()
 
 
 @router.get("/history/{exercise_id}", response_model=list[GymExerciseHistoryRead])
-def list_history(exercise_id: str, db: Session = Depends(get_db)):
-    _get_exercise_or_404(db, exercise_id)
+def list_history(exercise_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    _get_exercise_or_404(db, current_user.id, exercise_id)
     history = (
         db.query(GymExerciseHistory)
-        .filter(GymExerciseHistory.exercise_id == exercise_id)
+        .filter(GymExerciseHistory.exercise_id == exercise_id, GymExerciseHistory.user_id == current_user.id)
         .order_by(GymExerciseHistory.recorded_at.desc())
         .all()
     )
@@ -288,11 +296,12 @@ def list_history(exercise_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/history", response_model=GymExerciseHistoryRead, status_code=status.HTTP_201_CREATED)
-def create_history_entry(payload: GymExerciseHistoryCreate, db: Session = Depends(get_db)):
-    exercise = _get_exercise_or_404(db, payload.exercise_id)
+def create_history_entry(payload: GymExerciseHistoryCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    exercise = _get_exercise_or_404(db, current_user.id, payload.exercise_id)
     data = payload.model_dump(exclude_none=True)
     if not data.get("recorded_at"):
         data["recorded_at"] = datetime.utcnow()
+    data["user_id"] = current_user.id
     history_entry = GymExerciseHistory(**data)
     db.add(history_entry)
 
@@ -307,19 +316,19 @@ def create_history_entry(payload: GymExerciseHistoryCreate, db: Session = Depend
 
 
 @router.delete("/history/{history_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_history_entry(history_id: str, db: Session = Depends(get_db)):
-    entry = _get_history_or_404(db, history_id)
+def delete_history_entry(history_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    entry = _get_history_or_404(db, current_user.id, history_id)
     exercise_id = entry.exercise_id
     db.delete(entry)
     db.commit()
 
     latest = (
         db.query(GymExerciseHistory)
-        .filter(GymExerciseHistory.exercise_id == exercise_id)
+        .filter(GymExerciseHistory.exercise_id == exercise_id, GymExerciseHistory.user_id == current_user.id)
         .order_by(GymExerciseHistory.recorded_at.desc())
         .first()
     )
-    exercise = db.get(GymExercise, exercise_id)
+    exercise = db.query(GymExercise).filter(GymExercise.id == exercise_id, GymExercise.user_id == current_user.id).first()
     if exercise:
         meta = dict(exercise.extra_metadata or {})
         meta["last_performed_on"] = latest.recorded_at.isoformat() if latest else None
@@ -329,9 +338,9 @@ def delete_history_entry(history_id: str, db: Session = Depends(get_db)):
 
 
 @router.patch("/assignments/{assignment_id}", response_model=GymDayAssignmentRead)
-def update_assignment(assignment_id: str, payload: GymDayAssignmentUpdate, db: Session = Depends(get_db)):
-    assignment = _get_assignment_or_404(db, assignment_id)
-    exercise = _get_exercise_or_404(db, payload.selected_exercise_id)
+def update_assignment(assignment_id: str, payload: GymDayAssignmentUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    assignment = _get_assignment_or_404(db, current_user.id, assignment_id)
+    exercise = _get_exercise_or_404(db, current_user.id, payload.selected_exercise_id)
 
     assignment.selected_exercise_id = exercise.id
     db.add(assignment)
@@ -341,20 +350,20 @@ def update_assignment(assignment_id: str, payload: GymDayAssignmentUpdate, db: S
 
 
 @router.post("/assignments/{assignment_id}/substitute", response_model=GymDayAssignmentRead)
-def substitute_assignment(assignment_id: str, db: Session = Depends(get_db)):
-    assignment = _get_assignment_or_404(db, assignment_id)
+def substitute_assignment(assignment_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    assignment = _get_assignment_or_404(db, current_user.id, assignment_id)
     base_exercise_id = assignment.selected_exercise_id or assignment.default_exercise_id
     if not base_exercise_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assignment has no exercise to substitute")
 
-    reference_exercise = _get_exercise_or_404(db, base_exercise_id)
+    reference_exercise = _get_exercise_or_404(db, current_user.id, base_exercise_id)
     target_tokens = _collect_muscle_tokens(reference_exercise)
     slot_tokens = _collect_slot_tokens(assignment.slot_metadata)
     if slot_tokens:
         target_tokens |= slot_tokens
     active_exercises = (
         db.query(GymExercise)
-        .filter(GymExercise.is_active.is_(True))
+        .filter(GymExercise.user_id == current_user.id, GymExercise.is_active.is_(True))
         .order_by(GymExercise.name)
         .all()
     )
@@ -363,7 +372,7 @@ def substitute_assignment(assignment_id: str, db: Session = Depends(get_db)):
 
     def _build_rotation() -> list[str]:
         ranked = _rank_substitute_candidates(reference_exercise, active_exercises, target_tokens)
-        ranked = _append_explicit_options(ranked, assignment.options, db)
+        ranked = _append_explicit_options(ranked, assignment.options, db, current_user.id)
         unique_ids: list[str] = []
         seen_ids: set[str] = set()
         for exercise in ranked:
@@ -389,7 +398,7 @@ def substitute_assignment(assignment_id: str, db: Session = Depends(get_db)):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No substitute exercises found for this slot")
 
     next_exercise_id = rotation[1]
-    next_exercise = _get_exercise_or_404(db, next_exercise_id)
+    next_exercise = _get_exercise_or_404(db, current_user.id, next_exercise_id)
 
     assignment.selected_exercise = next_exercise
     assignment.options = rotation[1:] + rotation[:1]
@@ -397,3 +406,12 @@ def substitute_assignment(assignment_id: str, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(assignment)
     return GymDayAssignmentRead.model_validate(assignment)
+
+
+@router.put("/preferences/muscle-targets", status_code=status.HTTP_204_NO_CONTENT)
+def update_muscle_targets(payload: dict[str, dict[str, int]], db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    preferences = dict(current_user.preferences_json or {})
+    preferences["gym_muscle_targets"] = payload
+    current_user.preferences_json = preferences
+    db.add(current_user)
+    db.commit()
