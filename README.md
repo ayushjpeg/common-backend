@@ -157,3 +157,6 @@ Important: this backs up PostgreSQL data only. It does not back up media files u
 
 - Host this backend + PostgreSQL on your Linux server (Docker or bare-metal) and expose it with HTTPS. A ready-made workflow for your self-hosted runner lives at `.github/workflows/deploy.yml`.
 - Extend the routers with any app-specific logic (e.g., CCTV streaming controls) once the core plumbing is running.
+
+
+#TBD
