@@ -3,7 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import get_settings
-from .routers import auth, cctv, food, gym, health, media, tasks
+from .routers import auth, budget, cctv, food, gym, health, media, tasks
 
 settings = get_settings()
 
@@ -22,6 +22,7 @@ app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(tasks.router, prefix=settings.api_prefix)
 app.include_router(food.router, prefix=settings.api_prefix)
 app.include_router(gym.router, prefix=settings.api_prefix)
+app.include_router(budget.router, prefix=settings.api_prefix)
 app.include_router(cctv.router, prefix=settings.api_prefix)
 app.include_router(media.router, prefix=settings.api_prefix)
 
