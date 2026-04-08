@@ -21,8 +21,10 @@ jobs:
       - name: Run migrations
         run: |
           APP_DATABASE_URL='${{ secrets.APP_DATABASE_URL }}'
+          APP_ALLOWED_ORIGINS='${{ secrets.APP_ALLOWED_ORIGINS }}'
           docker run --rm -w /app --add-host host.docker.internal:host-gateway \
             -e APP_DATABASE_URL="$APP_DATABASE_URL" \
+            -e APP_ALLOWED_ORIGINS="$APP_ALLOWED_ORIGINS" \
             common-backend:latest alembic upgrade head
 
       - name: Run new container
