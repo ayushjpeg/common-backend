@@ -34,7 +34,15 @@ class Settings(BaseSettings):
 
     @property
     def parsed_allowed_origins(self) -> list[str]:
-        origins = [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
+        raw_value = self.allowed_origins.strip()
+        if raw_value.startswith("[") and raw_value.endswith("]"):
+            raw_value = raw_value[1:-1]
+
+        origins = []
+        for origin in raw_value.split(","):
+            cleaned = origin.strip().strip('"').strip("'")
+            if cleaned:
+                origins.append(cleaned)
         if not origins:
             raise ValueError("APP_ALLOWED_ORIGINS must contain at least one origin")
         return origins
