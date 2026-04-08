@@ -1,9 +1,10 @@
 from functools import lru_cache
 from pathlib import Path
 import logging
+from typing import Annotated
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -15,7 +16,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg2://task_user:task_password@localhost:5432/task_ops"
     media_root: Path = Path("./storage")
     media_base_url: str | None = None
-    allowed_origins: list[str]
+    allowed_origins: Annotated[list[str], NoDecode]
     auth_secret_key: str = "change-me"
     auth_cookie_name: str = "common_backend_session"
     auth_cookie_domain: str | None = ".ayux.in"
