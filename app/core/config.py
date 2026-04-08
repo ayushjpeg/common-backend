@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg2://task_user:task_password@localhost:5432/task_ops"
     media_root: Path = Path("./storage")
     media_base_url: str | None = None
-    allowed_origins: list[str] | str
+    allowed_origins: list[str]
     auth_secret_key: str = "change-me"
     auth_cookie_name: str = "common_backend_session"
     auth_cookie_domain: str | None = ".ayux.in"
@@ -33,6 +33,8 @@ class Settings(BaseSettings):
             if not stripped:
                 raise ValueError("APP_ALLOWED_ORIGINS must not be empty")
             return [origin.strip() for origin in stripped.split(",") if origin.strip()]
+        if not value:
+            raise ValueError("APP_ALLOWED_ORIGINS must not be empty")
         return value
 
     @property
