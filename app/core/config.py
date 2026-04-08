@@ -1,10 +1,9 @@
 from functools import lru_cache
 from pathlib import Path
 import logging
-from typing import Annotated
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -16,7 +15,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg2://task_user:task_password@localhost:5432/task_ops"
     media_root: Path = Path("./storage")
     media_base_url: str | None = None
-    allowed_origins: Annotated[list[str], NoDecode]
+    allowed_origins: str
     auth_secret_key: str = "change-me"
     auth_cookie_name: str = "common_backend_session"
     auth_cookie_domain: str | None = ".ayux.in"
@@ -28,15 +27,17 @@ class Settings(BaseSettings):
 
     @field_validator("allowed_origins", mode="before")
     @classmethod
-    def _split_origins(cls, value: str | list[str]) -> list[str]:
-        if isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                raise ValueError("APP_ALLOWED_ORIGINS must not be empty")
-            return [origin.strip() for origin in stripped.split(",") if origin.strip()]
-        if not value:
+    def _validate_allowed_origins(cls, value: str) -> str:
+        if not value or not value.strip():
             raise ValueError("APP_ALLOWED_ORIGINS must not be empty")
         return value
+
+    @property
+    def parsed_allowed_origins(self) -> list[str]:
+        origins = [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
+        if not origins:
+            raise ValueError("APP_ALLOWED_ORIGINS must contain at least one origin")
+        return origins
 
     @property
     def resolved_media_root(self) -> Path:
@@ -47,5 +48,5 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     settings = Settings()
     settings.resolved_media_root.mkdir(parents=True, exist_ok=True)
-    logging.getLogger("uvicorn").info("Allowed origins resolved: %s", settings.allowed_origins)
+    logging.getLogger("uvicorn").info("Allowed origins resolved: %s", settings.parsed_allowed_origins)
     return settings

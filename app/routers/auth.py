@@ -25,7 +25,7 @@ def _normalize_origin(origin: str) -> str:
 def _is_allowed_origin(origin: str) -> bool:
     settings = get_settings()
     normalized = _normalize_origin(origin)
-    return any(_normalize_origin(allowed) == normalized for allowed in settings.allowed_origins)
+    return any(_normalize_origin(allowed) == normalized for allowed in settings.parsed_allowed_origins)
 
 
 def _google_callback_url() -> str:
