@@ -2,21 +2,8 @@ from functools import lru_cache
 from pathlib import Path
 import logging
 
-from pydantic import Field, field_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-_DEFAULT_ORIGINS = [
-    "http://localhost:5173",
-    "http://localhost:8006",
-    "http://localhost:4173",
-    "http://localhost:3000",
-    "http://localhost:8004",
-    "https://food.ayux.in",
-    "https://cctv.ayux.in",
-    "https://gym.ayux.in",
-    "https://tasks.ayux.in",
-]
 
 
 class Settings(BaseSettings):
@@ -28,7 +15,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg2://task_user:task_password@localhost:5432/task_ops"
     media_root: Path = Path("./storage")
     media_base_url: str | None = None
-    allowed_origins: list[str] | str = Field(default_factory=lambda: _DEFAULT_ORIGINS.copy())
+    allowed_origins: list[str] | str
     auth_secret_key: str = "change-me"
     auth_cookie_name: str = "common_backend_session"
     auth_cookie_domain: str | None = ".ayux.in"
@@ -44,7 +31,7 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             stripped = value.strip()
             if not stripped:
-                return _DEFAULT_ORIGINS.copy()
+                raise ValueError("APP_ALLOWED_ORIGINS must not be empty")
             return [origin.strip() for origin in stripped.split(",") if origin.strip()]
         return value
 

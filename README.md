@@ -38,7 +38,7 @@ pip install -r requirements.txt
 
 2. **Configure environment variables**
 
-Create a `.env` file in the project root (values below are defaults):
+Create a `.env` file in the project root:
 
 ```
 APP_DATABASE_URL=postgresql+psycopg2://task_user:task_password@localhost:5432/task_ops
@@ -86,6 +86,7 @@ Google Cloud Console setup:
 1. Create an OAuth 2.0 Web Application credential.
 2. Add these JavaScript origins:
   - `https://food.ayux.in`
+  - `https://budget.ayux.in`
   - `https://gym.ayux.in`
   - `https://tasks.ayux.in`
   - `https://common-backend.ayux.in`
