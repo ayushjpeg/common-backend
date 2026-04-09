@@ -24,6 +24,12 @@ from ..schemas.task import (
 router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=[Depends(require_api_key)])
 
 
+def _normalize_metadata_value(key: str, value):
+    if key == "assigned_dates" and value is not None:
+        return [item.isoformat() if hasattr(item, "isoformat") else str(item) for item in value]
+    return value
+
+
 @router.get("/", response_model=list[TaskTemplateRead])
 def list_tasks(include_archived: bool = False, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     query = db.query(TaskTemplate).filter(TaskTemplate.user_id == current_user.id)
@@ -58,11 +64,11 @@ def _merge_metadata(payload: TaskTemplateCreate | TaskTemplateUpdate, base: dict
         "preferred_windows",
         "busy_windows",
         "importance",
-        "category",
+        "assigned_dates",
     ]:
         value = getattr(payload, key, None)
         if value is not None:
-            meta[key] = value
+            meta[key] = _normalize_metadata_value(key, value)
     return meta
 
 
@@ -70,6 +76,7 @@ def _merge_metadata(payload: TaskTemplateCreate | TaskTemplateUpdate, base: dict
 def create_task(payload: TaskTemplateCreate = Body(..., embed=False), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     task = TaskTemplate(
         user_id=current_user.id,
+        category=payload.category,
         title=payload.title,
         description=payload.description,
         duration_minutes=payload.duration_minutes,
@@ -95,6 +102,9 @@ def update_task(task_id: str, payload: TaskTemplateUpdate = Body(..., embed=Fals
     for key in ["title", "description", "duration_minutes", "priority", "recurrence", "is_archived"]:
         if key in updates:
             setattr(task, key, updates[key])
+
+    if "category" in updates:
+        task.category = updates["category"]
 
     task.metadata_json = metadata_patch
 
@@ -193,7 +203,15 @@ def _classify_task(task: TaskTemplate, last_done: date | None, week_start: date,
 @router.post("/schedule/preview", response_model=SchedulePreviewResponse)
 def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     week_start, week_end = _resolve_week(request)
-    tasks = db.query(TaskTemplate).filter(TaskTemplate.user_id == current_user.id, TaskTemplate.is_archived.is_(False)).all()
+    tasks = (
+        db.query(TaskTemplate)
+        .filter(
+            TaskTemplate.user_id == current_user.id,
+            TaskTemplate.is_archived.is_(False),
+            TaskTemplate.category == "occasional",
+        )
+        .all()
+    )
 
     candidates: list[ScheduledTaskCandidate] = []
     for task in tasks:
@@ -227,11 +245,19 @@ def commit_schedule(request: ScheduleCommitRequest, db: Session = Depends(get_db
     unique_task_ids = set(task_ids)
 
     if unique_task_ids:
-        known = db.query(TaskTemplate).filter(TaskTemplate.user_id == current_user.id, TaskTemplate.id.in_(unique_task_ids)).all()
+        known = (
+            db.query(TaskTemplate)
+            .filter(
+                TaskTemplate.user_id == current_user.id,
+                TaskTemplate.category == "occasional",
+                TaskTemplate.id.in_(unique_task_ids),
+            )
+            .all()
+        )
         found_ids = {task.id for task in known}
         missing = unique_task_ids - found_ids
         if missing:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown task ids: {', '.join(sorted(missing))}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown or non-occasional task ids: {', '.join(sorted(missing))}")
 
     # Build incoming week plan by task id.
     slots_by_task: dict[str, list[str]] = {task_id: [] for task_id in unique_task_ids}
@@ -243,7 +269,15 @@ def commit_schedule(request: ScheduleCommitRequest, db: Session = Depends(get_db
         values.sort()
 
     # Apply week-scoped overwrite: remove only slots in [week_start, week_end], preserve other weeks.
-    tasks = db.query(TaskTemplate).filter(TaskTemplate.user_id == current_user.id, TaskTemplate.is_archived.is_(False)).all()
+    tasks = (
+        db.query(TaskTemplate)
+        .filter(
+            TaskTemplate.user_id == current_user.id,
+            TaskTemplate.is_archived.is_(False),
+            TaskTemplate.category == "occasional",
+        )
+        .all()
+    )
     changed = False
 
     for task in tasks:

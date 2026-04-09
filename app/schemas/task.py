@@ -4,6 +4,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+TaskCategory = Literal["daily", "occasional", "long_term"]
+
+
 class TimeWindow(BaseModel):
     day: str | None = None
     start_time: str | None = None
@@ -30,6 +33,7 @@ class TaskRecurrence(BaseModel):
 
 
 class TaskTemplateBase(BaseModel):
+    category: TaskCategory = "occasional"
     title: str
     description: str | None = None
     duration_minutes: int = 30
@@ -41,7 +45,7 @@ class TaskTemplateBase(BaseModel):
     preferred_windows: list[TimeWindow] = Field(default_factory=list)
     busy_windows: list[TimeWindow] = Field(default_factory=list)
     importance: Literal["must", "do_if_possible", "flex"] | None = None
-    category: str | None = None
+    assigned_dates: list[date] = Field(default_factory=list)
 
 
 class TaskTemplateCreate(TaskTemplateBase):
@@ -49,6 +53,7 @@ class TaskTemplateCreate(TaskTemplateBase):
 
 
 class TaskTemplateUpdate(BaseModel):
+    category: TaskCategory | None = None
     title: str | None = None
     description: str | None = None
     duration_minutes: int | None = None
@@ -61,7 +66,7 @@ class TaskTemplateUpdate(BaseModel):
     preferred_windows: list[TimeWindow] | None = None
     busy_windows: list[TimeWindow] | None = None
     importance: Literal["must", "do_if_possible", "flex"] | None = None
-    category: str | None = None
+    assigned_dates: list[date] | None = None
 
 
 class TaskTemplateRead(TaskTemplateBase):
@@ -82,7 +87,7 @@ class TaskTemplateRead(TaskTemplateBase):
             "preferred_windows",
             "busy_windows",
             "importance",
-            "category",
+            "assigned_dates",
         ]:
             if key in meta and values.get(key) is None:
                 values[key] = meta.get(key)
