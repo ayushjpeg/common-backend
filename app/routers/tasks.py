@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -122,12 +122,25 @@ def _task_trigger(task: TaskTemplate) -> tuple[str | None, int]:
     return trigger_task_id, trigger_after_days
 
 
+def _normalize_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(UTC).replace(tzinfo=None)
+
+
+def _parse_metadata_datetime(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return _normalize_datetime(parsed)
+
+
 def _task_scheduled_slots(task: TaskTemplate) -> list[tuple[str, datetime]]:
     parsed_slots: list[tuple[str, datetime]] = []
     for raw in _task_meta(task).get("scheduled_slots") or []:
-        try:
-            parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-        except ValueError:
+        parsed = _parse_metadata_datetime(str(raw))
+        if parsed is None:
             continue
         parsed_slots.append((str(raw), parsed))
     parsed_slots.sort(key=lambda item: item[1])
@@ -137,7 +150,7 @@ def _task_scheduled_slots(task: TaskTemplate) -> list[tuple[str, datetime]]:
 def _completion_days_by_task(history: list[TaskHistory]) -> dict[str, set[date]]:
     completion_days: dict[str, set[date]] = {}
     for entry in history:
-        completion_days.setdefault(entry.task_id, set()).add(entry.completed_at.date())
+        completion_days.setdefault(entry.task_id, set()).add(_normalize_datetime(entry.completed_at).date())
     return completion_days
 
 
@@ -148,16 +161,16 @@ def _latest_completion_by_task(tasks: list[TaskTemplate], history: list[TaskHist
         last_completed_at = _task_meta(task).get("lastCompletedAt")
         if not last_completed_at:
             continue
-        try:
-            parsed = datetime.fromisoformat(str(last_completed_at).replace("Z", "+00:00"))
-        except ValueError:
+        parsed = _parse_metadata_datetime(str(last_completed_at))
+        if parsed is None:
             continue
         latest[task.id] = parsed
 
     for entry in history:
+        completed_at = _normalize_datetime(entry.completed_at)
         existing = latest.get(entry.task_id)
-        if existing is None or entry.completed_at > existing:
-            latest[entry.task_id] = entry.completed_at
+        if existing is None or completed_at > existing:
+            latest[entry.task_id] = completed_at
 
     return latest
 
@@ -355,9 +368,8 @@ def _clear_task_slots(meta: dict, action_date: date, scheduled_slot: str | None,
     else:
         remaining = []
         for value in slots:
-            try:
-                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            except ValueError:
+            parsed = _parse_metadata_datetime(value)
+            if parsed is None:
                 remaining.append(value)
                 continue
             if parsed.date() != action_date:
@@ -372,19 +384,20 @@ def _clear_task_slots(meta: dict, action_date: date, scheduled_slot: str | None,
 def _record_task_action(task: TaskTemplate, payload: TaskActionRequest, user_id: str) -> tuple[TaskTemplate, TaskHistory | None]:
     meta = dict(task.metadata_json or {})
     history_record: TaskHistory | None = None
-    action_day = payload.action_date.date()
+    action_at = _normalize_datetime(payload.action_date)
+    action_day = action_at.date()
 
     if payload.action in {"complete", "skip"}:
         if (task.category or "occasional") == "occasional":
             meta = _clear_task_slots(meta, action_day, payload.scheduled_slot, payload.scheduled_slots_to_clear)
 
         if payload.status in {"completed", "progress"}:
-            meta["lastCompletedAt"] = payload.action_date.isoformat()
+            meta["lastCompletedAt"] = action_at.isoformat()
 
         history_record = TaskHistory(
             task_id=task.id,
             user_id=user_id,
-            completed_at=payload.action_date,
+            completed_at=action_at,
             duration_minutes=payload.duration_minutes or task.duration_minutes,
             note=payload.note,
             status=payload.status,
@@ -397,10 +410,7 @@ def _record_task_action(task: TaskTemplate, payload: TaskActionRequest, user_id:
         meta = _clear_task_slots(meta, action_day, payload.scheduled_slot, payload.scheduled_slots_to_clear)
         source_dt = None
         if payload.scheduled_slot:
-            try:
-                source_dt = datetime.fromisoformat(payload.scheduled_slot.replace("Z", "+00:00"))
-            except ValueError:
-                source_dt = None
+            source_dt = _parse_metadata_datetime(payload.scheduled_slot)
         if source_dt is None:
             source_dt = datetime.combine(action_day, time(9, 0))
         next_slot = datetime.combine(target_date, source_dt.timetz().replace(tzinfo=None))
@@ -673,9 +683,8 @@ def commit_schedule(request: ScheduleCommitRequest, db: Session = Depends(get_db
 
         keep_outside_week: list[str] = []
         for value in slots:
-            try:
-                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            except ValueError:
+            parsed = _parse_metadata_datetime(value)
+            if parsed is None:
                 # Preserve malformed values instead of dropping user data unexpectedly.
                 keep_outside_week.append(value)
                 continue
