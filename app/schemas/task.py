@@ -173,3 +173,55 @@ class ScheduleCommitResponse(BaseModel):
     message: str
     stored: bool = False
     plan: list[ScheduledTaskSlot] = Field(default_factory=list)
+
+
+class PlannerTaskCard(BaseModel):
+    id: str
+    task_id: str
+    category: TaskCategory
+    title: str
+    description: str | None = None
+    duration: int
+    chunk_minutes: int
+    priority: str
+    priority_label: str
+    autop: bool = False
+    status: str
+    type: str
+    part: str | None = None
+    due_date: date
+    scheduled_slot: str | None = None
+    scheduled_slots_to_clear: list[str] = Field(default_factory=list)
+    scheduled_time: str | None = None
+    window: str = "any"
+    notes_enabled: bool = True
+
+
+class PlannerDay(BaseModel):
+    date: date
+    label: str
+    short_label: str
+    tasks: list[PlannerTaskCard] = Field(default_factory=list)
+    total_minutes: int = 0
+
+
+class PlannerResponse(BaseModel):
+    start: date
+    end: date
+    days: list[PlannerDay] = Field(default_factory=list)
+
+
+class TaskActionRequest(BaseModel):
+    action: Literal["complete", "skip", "snooze", "reschedule"] = "complete"
+    action_date: datetime
+    duration_minutes: int | None = None
+    note: str | None = None
+    status: str = "completed"
+    scheduled_slot: str | None = None
+    scheduled_slots_to_clear: list[str] = Field(default_factory=list)
+    target_date: date | None = None
+
+
+class TaskActionResponse(BaseModel):
+    task: TaskTemplateRead
+    history: TaskHistoryRead | None = None
