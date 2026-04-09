@@ -31,13 +31,13 @@ class GymExercise(Base):
     default_assignments = relationship(
         "GymDayAssignment",
         back_populates="default_exercise",
-        cascade="all, delete",
+        passive_deletes=True,
         foreign_keys="GymDayAssignment.default_exercise_id",
     )
     selected_assignments = relationship(
         "GymDayAssignment",
         back_populates="selected_exercise",
-        cascade="all, delete",
+        passive_deletes=True,
         foreign_keys="GymDayAssignment.selected_exercise_id",
     )
 

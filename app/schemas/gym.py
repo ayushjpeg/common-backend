@@ -106,8 +106,18 @@ class GymDayAssignmentUpdate(BaseModel):
     selected_exercise_id: str
 
 
+class GymDayAssignmentCreate(BaseModel):
+    day_key: str
+    selected_exercise_id: str
+
+
+class GymDaySettingsUpdate(BaseModel):
+    day_settings: dict[str, str] = Field(default_factory=dict)
+
+
 class GymBootstrapResponse(BaseModel):
     exercises: list[GymExerciseRead]
     assignments: list[GymDayAssignmentRead]
     history: list[GymExerciseHistoryRead]
     muscle_targets: dict[str, dict[str, int]]
+    day_settings: dict[str, str] = Field(default_factory=dict)

@@ -8,12 +8,15 @@ from sqlalchemy.orm import Session
 
 from ..core.database import get_db
 from ..core.security import get_current_user, require_api_key
+from ..data.gym_defaults import WEEK_TEMPLATE
 from ..models.gym import GymDayAssignment, GymExercise, GymExerciseHistory
 from ..models.user import User
 from ..schemas.gym import (
     GymBootstrapResponse,
+    GymDayAssignmentCreate,
     GymDayAssignmentRead,
     GymDayAssignmentUpdate,
+    GymDaySettingsUpdate,
     GymExerciseCreate,
     GymExerciseHistoryCreate,
     GymExerciseHistoryRead,
@@ -41,6 +44,47 @@ _MUSCLE_SYNONYMS = {
     "lower back": ("lower back", "lowerback", "lumbar"),
     "full body": ("full body", "fullbody", "total body"),
 }
+
+_DAY_MODES = {"strength", "cardio", "rest"}
+
+
+def _default_day_settings() -> dict[str, str]:
+    settings: dict[str, str] = {}
+    for day_key, config in WEEK_TEMPLATE.items():
+        if config.get("cardio"):
+            settings[day_key] = "cardio"
+        elif config.get("exercise_order"):
+            settings[day_key] = "strength"
+        else:
+            settings[day_key] = "rest"
+    return settings
+
+
+def _get_day_settings(current_user: User) -> dict[str, str]:
+    stored = (current_user.preferences_json or {}).get("gym_day_settings") or {}
+    normalized = _default_day_settings()
+    for day_key, value in stored.items():
+        if day_key in normalized and value in _DAY_MODES:
+            normalized[day_key] = value
+    return normalized
+
+
+def _build_assignment_metadata(day_key: str) -> dict:
+    config = WEEK_TEMPLATE.get(day_key) or {}
+    metadata = {
+        "day_key": day_key,
+        "label": config.get("label") or day_key.title(),
+        "theme": config.get("theme") or f"{day_key.title()} session",
+        "description": config.get("description") or "Custom gym day",
+        "cardio": bool(config.get("cardio")),
+    }
+    if config.get("cardio_plan"):
+        metadata["cardio_plan"] = config.get("cardio_plan")
+    if config.get("muscles"):
+        metadata["muscles"] = config.get("muscles")
+    if config.get("focus"):
+        metadata["focus"] = config.get("focus")
+    return metadata
 
 
 def _normalize_muscle(value: str | None) -> str:
@@ -214,6 +258,7 @@ def bootstrap_gym(db: Session = Depends(get_db), current_user: User = Depends(ge
         assignments=assignment_payload,
         history=history_payload,
         muscle_targets=(current_user.preferences_json or {}).get("gym_muscle_targets") or get_default_muscle_targets(),
+        day_settings=_get_day_settings(current_user),
     )
 
 
@@ -279,6 +324,36 @@ def update_exercise(exercise_id: str, payload: GymExerciseUpdate, db: Session = 
 @router.delete("/exercises/{exercise_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_exercise(exercise_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     exercise = _get_exercise_or_404(db, current_user.id, exercise_id)
+
+    assignments = (
+        db.query(GymDayAssignment)
+        .filter(
+            GymDayAssignment.user_id == current_user.id,
+            (GymDayAssignment.default_exercise_id == exercise.id)
+            | (GymDayAssignment.selected_exercise_id == exercise.id),
+        )
+        .all()
+    )
+
+    for assignment in assignments:
+        is_manual_assignment = (assignment.slot_id or "").startswith(f"manual-{assignment.day_key}-")
+        if is_manual_assignment and assignment.default_exercise_id == exercise.id:
+            db.delete(assignment)
+            continue
+
+        option_ids = [option_id for option_id in (assignment.options or []) if option_id != exercise.id]
+        assignment.options = option_ids
+
+        if assignment.default_exercise_id == exercise.id:
+            assignment.default_exercise_id = None
+            assignment.slot_name = assignment.slot_name or exercise.name
+            if assignment.selected_exercise_id == exercise.id:
+                assignment.selected_exercise_id = option_ids[0] if option_ids else None
+        elif assignment.selected_exercise_id == exercise.id:
+            assignment.selected_exercise_id = assignment.default_exercise_id or (option_ids[0] if option_ids else None)
+
+        db.add(assignment)
+
     db.delete(exercise)
     db.commit()
 
@@ -349,6 +424,68 @@ def update_assignment(assignment_id: str, payload: GymDayAssignmentUpdate, db: S
     return GymDayAssignmentRead.model_validate(assignment)
 
 
+@router.post("/assignments", response_model=GymDayAssignmentRead, status_code=status.HTTP_201_CREATED)
+def create_assignment(payload: GymDayAssignmentCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if payload.day_key not in WEEK_TEMPLATE:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid day key")
+
+    exercise = _get_exercise_or_404(db, current_user.id, payload.selected_exercise_id)
+    existing = (
+        db.query(GymDayAssignment)
+        .filter(
+            GymDayAssignment.user_id == current_user.id,
+            GymDayAssignment.day_key == payload.day_key,
+        )
+        .first()
+    )
+    if existing:
+        if existing.default_exercise_id == exercise.id or existing.selected_exercise_id == exercise.id:
+            return GymDayAssignmentRead.model_validate(existing)
+
+    existing_default = (
+        db.query(GymDayAssignment)
+        .filter(
+            GymDayAssignment.user_id == current_user.id,
+            GymDayAssignment.day_key == payload.day_key,
+            GymDayAssignment.default_exercise_id == exercise.id,
+        )
+        .first()
+    )
+    if existing_default:
+        return GymDayAssignmentRead.model_validate(existing_default)
+
+    last_order = (
+        db.query(GymDayAssignment.order_index)
+        .filter(GymDayAssignment.user_id == current_user.id, GymDayAssignment.day_key == payload.day_key)
+        .order_by(GymDayAssignment.order_index.desc())
+        .first()
+    )
+    next_order = (last_order[0] + 1) if last_order else 0
+    assignment = GymDayAssignment(
+        user_id=current_user.id,
+        day_key=payload.day_key,
+        slot_id=f"manual-{payload.day_key}-{exercise.id}"[:64],
+        slot_name=exercise.name,
+        slot_subtitle=exercise.target_notes,
+        order_index=next_order,
+        default_exercise_id=exercise.id,
+        selected_exercise_id=exercise.id,
+        options=[exercise.id],
+        slot_metadata=_build_assignment_metadata(payload.day_key),
+    )
+    db.add(assignment)
+    db.commit()
+    db.refresh(assignment)
+    return GymDayAssignmentRead.model_validate(assignment)
+
+
+@router.delete("/assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_assignment(assignment_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    assignment = _get_assignment_or_404(db, current_user.id, assignment_id)
+    db.delete(assignment)
+    db.commit()
+
+
 @router.post("/assignments/{assignment_id}/substitute", response_model=GymDayAssignmentRead)
 def substitute_assignment(assignment_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     assignment = _get_assignment_or_404(db, current_user.id, assignment_id)
@@ -412,6 +549,23 @@ def substitute_assignment(assignment_id: str, db: Session = Depends(get_db), cur
 def update_muscle_targets(payload: dict[str, dict[str, int]], db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     preferences = dict(current_user.preferences_json or {})
     preferences["gym_muscle_targets"] = payload
+    current_user.preferences_json = preferences
+    db.add(current_user)
+    db.commit()
+
+
+@router.put("/preferences/day-settings", status_code=status.HTTP_204_NO_CONTENT)
+def update_day_settings(payload: GymDaySettingsUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    normalized = _default_day_settings()
+    for day_key, value in (payload.day_settings or {}).items():
+        if day_key not in normalized:
+            continue
+        if value not in _DAY_MODES:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid mode for {day_key}")
+        normalized[day_key] = value
+
+    preferences = dict(current_user.preferences_json or {})
+    preferences["gym_day_settings"] = normalized
     current_user.preferences_json = preferences
     db.add(current_user)
     db.commit()
