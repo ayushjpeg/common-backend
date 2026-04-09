@@ -3,23 +3,35 @@ from datetime import date, datetime
 from pydantic import BaseModel, Field, field_validator
 
 
-BUDGET_CATEGORIES = ["Investments", "Rusty", "Household", "Extra"]
+DEFAULT_BUDGET_CATEGORIES = ["Investments", "Rusty", "Household", "Extra"]
 
 
 def _normalize_category(value: str) -> str:
-    normalized = (value or "").strip().lower()
-    alias_map = {
-        "investment": "Investments",
-        "investments": "Investments",
-        "investement": "Investments",
-        "investements": "Investments",
-        "rusty": "Rusty",
-        "household": "Household",
-        "extra": "Extra",
-    }
-    if normalized not in alias_map:
-        raise ValueError(f"Category must be one of: {', '.join(BUDGET_CATEGORIES)}")
-    return alias_map[normalized]
+    cleaned = " ".join((value or "").split()).strip()
+    if not cleaned:
+        raise ValueError("Category is required")
+    if len(cleaned) > 64:
+        raise ValueError("Category must be 64 characters or fewer")
+    return cleaned
+
+
+class BudgetCategoryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        return _normalize_category(value)
+
+
+class BudgetCategoryRead(BaseModel):
+    id: str
+    name: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class BudgetEntryBase(BaseModel):
@@ -77,5 +89,6 @@ class BudgetCategorySummary(BaseModel):
 class BudgetEntriesResponse(BaseModel):
     month: str
     total_spend: float
+    categories: list[BudgetCategoryRead]
     category_totals: list[BudgetCategorySummary]
     entries: list[BudgetEntryRead]
