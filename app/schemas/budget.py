@@ -3,9 +3,6 @@ from datetime import date, datetime
 from pydantic import BaseModel, Field, field_validator
 
 
-DEFAULT_BUDGET_CATEGORIES = ["Investments", "Rusty", "Household", "Extra"]
-
-
 def _normalize_category(value: str) -> str:
     cleaned = " ".join((value or "").split()).strip()
     if not cleaned:
