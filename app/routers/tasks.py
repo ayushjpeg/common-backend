@@ -27,6 +27,8 @@ router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=[Depends(requir
 def _normalize_metadata_value(key: str, value):
     if key == "assigned_weekdays" and value is not None:
         return [int(item) for item in value]
+    if key == "trigger_after_days" and value is not None:
+        return int(value)
     return value
 
 
@@ -58,6 +60,7 @@ def list_all_history(limit: int = 250, db: Session = Depends(get_db), current_us
 
 def _merge_metadata(payload: TaskTemplateCreate | TaskTemplateUpdate, base: dict | None = None) -> dict:
     meta = dict(base or {})
+    provided_fields = getattr(payload, "model_fields_set", set())
     for key in [
         "frequency_min_days",
         "frequency_max_days",
@@ -65,11 +68,25 @@ def _merge_metadata(payload: TaskTemplateCreate | TaskTemplateUpdate, base: dict
         "busy_windows",
         "importance",
         "assigned_weekdays",
+        "trigger_task_id",
+        "trigger_after_days",
     ]:
+        if key not in provided_fields:
+            continue
         value = getattr(payload, key, None)
-        if value is not None:
+        if value is None:
+            meta.pop(key, None)
+        else:
             meta[key] = _normalize_metadata_value(key, value)
     return meta
+
+
+def _is_dependency_scheduled(task: TaskTemplate) -> bool:
+    recurrence = task.recurrence or {}
+    if (recurrence.get("mode") or "repeat") != "after_completion":
+        return False
+    meta = task.metadata_json or {}
+    return bool(meta.get("trigger_task_id"))
 
 
 @router.post("/", response_model=TaskTemplateRead, status_code=status.HTTP_201_CREATED)
@@ -212,6 +229,7 @@ def preview_schedule(request: ScheduleRequest, db: Session = Depends(get_db), cu
         )
         .all()
     )
+    tasks = [task for task in tasks if not _is_dependency_scheduled(task)]
 
     candidates: list[ScheduledTaskCandidate] = []
     for task in tasks:
@@ -254,6 +272,7 @@ def commit_schedule(request: ScheduleCommitRequest, db: Session = Depends(get_db
             )
             .all()
         )
+        known = [task for task in known if not _is_dependency_scheduled(task)]
         found_ids = {task.id for task in known}
         missing = unique_task_ids - found_ids
         if missing:

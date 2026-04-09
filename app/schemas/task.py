@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 
 TaskCategory = Literal["daily", "occasional", "long_term_task", "long_term_goal"]
+TaskRecurrenceMode = Literal["repeat", "one_time", "after_completion"]
 
 
 class TimeWindow(BaseModel):
@@ -28,7 +29,7 @@ class RecurrenceWindow(BaseModel):
 
 
 class TaskRecurrence(BaseModel):
-    mode: Literal["repeat", "one_time"] = Field(default="repeat")
+    mode: TaskRecurrenceMode = Field(default="repeat")
     config: RecurrenceWindow = Field(default_factory=RecurrenceWindow)
 
 
@@ -46,6 +47,8 @@ class TaskTemplateBase(BaseModel):
     busy_windows: list[TimeWindow] = Field(default_factory=list)
     importance: Literal["must", "do_if_possible", "flex"] | None = None
     assigned_weekdays: list[int] = Field(default_factory=list)
+    trigger_task_id: str | None = None
+    trigger_after_days: int | None = Field(default=None, ge=0)
 
 
 class TaskTemplateCreate(TaskTemplateBase):
@@ -67,6 +70,8 @@ class TaskTemplateUpdate(BaseModel):
     busy_windows: list[TimeWindow] | None = None
     importance: Literal["must", "do_if_possible", "flex"] | None = None
     assigned_weekdays: list[int] | None = None
+    trigger_task_id: str | None = None
+    trigger_after_days: int | None = Field(default=None, ge=0)
 
 
 class TaskTemplateRead(TaskTemplateBase):
@@ -88,6 +93,8 @@ class TaskTemplateRead(TaskTemplateBase):
             "busy_windows",
             "importance",
             "assigned_weekdays",
+            "trigger_task_id",
+            "trigger_after_days",
         ]:
             if key in meta and values.get(key) is None:
                 values[key] = meta.get(key)
