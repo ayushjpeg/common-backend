@@ -25,8 +25,8 @@ router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=[Depends(requir
 
 
 def _normalize_metadata_value(key: str, value):
-    if key == "assigned_dates" and value is not None:
-        return [item.isoformat() if hasattr(item, "isoformat") else str(item) for item in value]
+    if key == "assigned_weekdays" and value is not None:
+        return [int(item) for item in value]
     return value
 
 
@@ -64,7 +64,7 @@ def _merge_metadata(payload: TaskTemplateCreate | TaskTemplateUpdate, base: dict
         "preferred_windows",
         "busy_windows",
         "importance",
-        "assigned_dates",
+        "assigned_weekdays",
     ]:
         value = getattr(payload, key, None)
         if value is not None:

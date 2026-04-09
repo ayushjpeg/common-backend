@@ -4,7 +4,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-TaskCategory = Literal["daily", "occasional", "long_term"]
+TaskCategory = Literal["daily", "occasional", "long_term_task", "long_term_goal"]
 
 
 class TimeWindow(BaseModel):
@@ -45,7 +45,7 @@ class TaskTemplateBase(BaseModel):
     preferred_windows: list[TimeWindow] = Field(default_factory=list)
     busy_windows: list[TimeWindow] = Field(default_factory=list)
     importance: Literal["must", "do_if_possible", "flex"] | None = None
-    assigned_dates: list[date] = Field(default_factory=list)
+    assigned_weekdays: list[int] = Field(default_factory=list)
 
 
 class TaskTemplateCreate(TaskTemplateBase):
@@ -66,7 +66,7 @@ class TaskTemplateUpdate(BaseModel):
     preferred_windows: list[TimeWindow] | None = None
     busy_windows: list[TimeWindow] | None = None
     importance: Literal["must", "do_if_possible", "flex"] | None = None
-    assigned_dates: list[date] | None = None
+    assigned_weekdays: list[int] | None = None
 
 
 class TaskTemplateRead(TaskTemplateBase):
@@ -87,7 +87,7 @@ class TaskTemplateRead(TaskTemplateBase):
             "preferred_windows",
             "busy_windows",
             "importance",
-            "assigned_dates",
+            "assigned_weekdays",
         ]:
             if key in meta and values.get(key) is None:
                 values[key] = meta.get(key)
