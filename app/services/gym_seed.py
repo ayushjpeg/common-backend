@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime
 
 from sqlalchemy.orm import Session
 
 from ..core.database import SessionLocal
-from ..data.gym_defaults import DEFAULT_EXERCISES, DEFAULT_HISTORY, DEFAULT_MUSCLE_TARGETS, DEFAULT_NOTES, WEEK_TEMPLATE
-from ..models.gym import GymDayAssignment, GymExercise, GymExerciseHistory
+from ..data.gym_defaults import DEFAULT_EXERCISES, DEFAULT_MUSCLE_TARGETS, DEFAULT_NOTES, WEEK_TEMPLATE
+from ..models.gym import GymExercise, GymExerciseHistory
 
 
 def _build_assignment_metadata(day_key: str, config: dict) -> dict:
@@ -32,9 +31,46 @@ def _scoped_exercise_id(user_id: str, exercise_id: str) -> str:
     return f"u{digest}_{exercise_id}"[:64]
 
 
+def _cleanup_seeded_gym_history(db: Session, user_id: str) -> None:
+    history_entries = (
+        db.query(GymExerciseHistory)
+        .filter(GymExerciseHistory.user_id == user_id)
+        .all()
+    )
+    seeded_entries = [entry for entry in history_entries if (entry.metrics or {}).get("seed")]
+
+    if seeded_entries:
+        for entry in seeded_entries:
+            db.delete(entry)
+        db.flush()
+
+    latest_history_by_exercise: dict[str, GymExerciseHistory] = {}
+    remaining_history = [entry for entry in history_entries if not (entry.metrics or {}).get("seed")]
+    for entry in remaining_history:
+        existing = latest_history_by_exercise.get(entry.exercise_id)
+        if not existing or entry.recorded_at >= existing.recorded_at:
+            latest_history_by_exercise[entry.exercise_id] = entry
+
+    exercises = db.query(GymExercise).filter(GymExercise.user_id == user_id).all()
+    changed = False
+    for exercise in exercises:
+        latest = latest_history_by_exercise.get(exercise.id)
+        metadata = dict(exercise.extra_metadata or {})
+        next_last_performed = latest.recorded_at.isoformat() if latest else None
+        if metadata.get("last_performed_on") != next_last_performed:
+            metadata["last_performed_on"] = next_last_performed
+            exercise.extra_metadata = metadata
+            db.add(exercise)
+            changed = True
+
+    if seeded_entries or changed:
+        db.commit()
+
+
 def ensure_user_gym_defaults(db: Session, user_id: str) -> None:
     has_exercises = db.query(GymExercise.id).filter(GymExercise.user_id == user_id).first()
     if has_exercises:
+        _cleanup_seeded_gym_history(db, user_id)
         return
 
     scoped_ids: dict[str, str] = {}
@@ -56,7 +92,7 @@ def ensure_user_gym_defaults(db: Session, user_id: str) -> None:
             swap_suggestions=payload.get("swap_suggestions", []),
             extra_metadata={
                 "notes": DEFAULT_NOTES.get(exercise_id, ""),
-                "last_performed_on": payload.get("last_performed_on"),
+                "last_performed_on": None,
                 "cardio": payload.get("metadata", {}).get("cardio", False),
                 "day_key": payload.get("metadata", {}).get("day_key"),
                 "template_key": exercise_id,
@@ -65,58 +101,6 @@ def ensure_user_gym_defaults(db: Session, user_id: str) -> None:
         db.add(exercise)
     db.flush()
 
-    for day_key, config in WEEK_TEMPLATE.items():
-        metadata = _build_assignment_metadata(day_key, config)
-        exercise_rows = config.get("exercise_order", [])
-        if config.get("cardio") and not exercise_rows:
-            exercise_rows = [
-                {
-                    "slot_id": f"{day_key}-cardio",
-                    "name": config.get("theme", "Cardio"),
-                    "subtitle": config.get("cardio_plan", {}).get("suggestions"),
-                    "default_exercise": f"cardio_{day_key}",
-                    "options": [f"cardio_{day_key}"],
-                }
-            ]
-
-        for order_index, slot in enumerate(exercise_rows):
-            default_key = slot.get("default_exercise")
-            default_id = scoped_ids.get(default_key, default_key)
-            option_ids = [scoped_ids.get(option_id, option_id) for option_id in slot.get("options", [])]
-            assignment = GymDayAssignment(
-                user_id=user_id,
-                day_key=day_key,
-                slot_id=slot["slot_id"],
-                slot_name=slot["name"],
-                slot_subtitle=slot.get("subtitle"),
-                order_index=order_index,
-                default_exercise_id=default_id,
-                selected_exercise_id=default_id,
-                options=option_ids,
-                slot_metadata=metadata,
-            )
-            db.add(assignment)
-    db.flush()
-
-    for exercise_id, entries in DEFAULT_HISTORY.items():
-        scoped_id = scoped_ids.get(exercise_id)
-        if not scoped_id:
-            continue
-        for entry in entries:
-            sets = entry.get("sets") or []
-            if not sets:
-                continue
-            history = GymExerciseHistory(
-                user_id=user_id,
-                exercise_id=scoped_id,
-                recorded_at=datetime.fromisoformat(entry.get("date")),
-                day_key=entry.get("day_key"),
-                slot_id=entry.get("slot_id"),
-                sets=sets,
-                notes=entry.get("notes"),
-                metrics={"seed": True},
-            )
-            db.add(history)
     db.commit()
 
 
