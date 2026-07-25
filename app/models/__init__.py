@@ -5,3 +5,4 @@ from .budget import BudgetCategory, BudgetEntry  # noqa: F401
 from .cctv import CCTVStream, CCTVRecording  # noqa: F401
 from .media_asset import MediaAsset  # noqa: F401
 from .user import User  # noqa: F401
+from .ultimate_ttt import UltimateTicTacToeGame, UltimateTicTacToeInvite, UltimateTicTacToeMove, UltimateTicTacToePresence  # noqa: F401

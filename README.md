@@ -43,7 +43,7 @@ Create a `.env` file in the project root:
 ```
 APP_DATABASE_URL=postgresql+psycopg2://task_user:task_password@localhost:5432/task_ops
 APP_MEDIA_ROOT=./storage
-APP_ALLOWED_ORIGINS=["http://localhost:8006","https://tasks.ayux.in"]
+APP_ALLOWED_ORIGINS=["http://localhost:8004","http://localhost:8005","http://localhost:8006","http://localhost:8011","http://localhost:8012","http://localhost:8013","https://dashboard.ayux.in","https://gym.ayux.in","https://food.ayux.in","https://tasks.ayux.in","https://budget.ayux.in","https://superttt.ayux.in"]
 APP_PUBLIC_BASE_URL=https://common-backend.ayux.in
 APP_AUTH_SECRET_KEY=replace-with-a-random-secret
 APP_GOOGLE_CLIENT_ID=
@@ -71,7 +71,7 @@ When deploying through GitHub Actions on a self-hosted runner, set `APP_DATABASE
 
 ## Google authentication
 
-The backend now owns authentication for Food, Gym, and Tasks. Frontends redirect users to the backend's Google OAuth flow, and the backend returns a signed session cookie scoped for your `*.ayux.in` apps.
+The backend now owns authentication for Dashboard, Food, Gym, Tasks, Budget, and SuperTTT. Frontends redirect users to the backend's Google OAuth flow, and the backend returns a signed session cookie scoped for your `*.ayux.in` apps.
 
 Required settings:
 
@@ -89,6 +89,8 @@ Google Cloud Console setup:
   - `https://budget.ayux.in`
   - `https://gym.ayux.in`
   - `https://tasks.ayux.in`
+  - `https://superttt.ayux.in`
+  - `https://dashboard.ayux.in`
   - `https://common-backend.ayux.in`
 3. Add this redirect URI:
   - `https://common-backend.ayux.in/api/auth/google/callback`

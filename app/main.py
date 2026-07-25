@@ -3,7 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import get_settings
-from .routers import auth, budget, cctv, food, gym, health, media, tasks
+from .routers import auth, budget, cctv, food, gym, health, media, tasks, ultimate_ttt
 
 settings = get_settings()
 
@@ -25,5 +25,6 @@ app.include_router(gym.router, prefix=settings.api_prefix)
 app.include_router(budget.router, prefix=settings.api_prefix)
 app.include_router(cctv.router, prefix=settings.api_prefix)
 app.include_router(media.router, prefix=settings.api_prefix)
+app.include_router(ultimate_ttt.router, prefix=settings.api_prefix)
 
 app.mount("/media", StaticFiles(directory=settings.resolved_media_root), name="media")
