@@ -81,6 +81,8 @@ Required settings:
 - `APP_GOOGLE_CLIENT_SECRET`: matching Google OAuth client secret
 - `APP_AUTH_COOKIE_DOMAIN`: cookie domain, usually `.ayux.in`
 
+For SuperTTT production login, ensure `https://superttt.ayux.in` is present in `APP_ALLOWED_ORIGINS` before deploying the backend.
+
 Google Cloud Console setup:
 
 1. Create an OAuth 2.0 Web Application credential.
