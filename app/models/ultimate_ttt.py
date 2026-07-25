@@ -49,6 +49,7 @@ class UltimateTicTacToeMove(Base):
     board_col = Column(Integer, nullable=False)
     cell_row = Column(Integer, nullable=False)
     cell_col = Column(Integer, nullable=False)
+    value = Column(Integer, nullable=False, default=0)
     move_index = Column(Integer, nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 

@@ -5,7 +5,7 @@ import random
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import and_, or_
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ..core.database import get_db
@@ -13,7 +13,7 @@ from ..core.security import get_current_user, require_api_key
 from ..models.ultimate_ttt import UltimateTicTacToeGame, UltimateTicTacToeInvite, UltimateTicTacToeMove, UltimateTicTacToePresence
 from ..models.user import User
 from ..schemas.ultimate_ttt import ActivePlayerRead, GameCreateBot, GamePoint, GameRead, InviteCreate, InviteRead, MoveCreate, PresenceAck
-from ..services.ultimate_ttt_logic import apply_move, initial_board_state, initial_subgrid_state, legal_moves
+from ..services.ultimate_ttt_logic import apply_move, initial_board_state, initial_subgrid_state, legal_moves, legal_values_for_subgrid
 
 router = APIRouter(prefix="/ultimate-ttt", tags=["ultimate-ttt"], dependencies=[Depends(require_api_key)])
 
@@ -104,8 +104,9 @@ def _apply_recorded_move(
     symbol: str,
     user_id: str | None,
     move: tuple[int, int, int, int],
+    value: int,
 ) -> None:
-    result = apply_move(game.board_state, game.subgrid_state, move, symbol)
+    result = apply_move(game.board_state, game.subgrid_state, move, symbol, value)
     board_row, board_col, cell_row, cell_col = move
 
     game.board_state = result["board_state"]
@@ -115,6 +116,7 @@ def _apply_recorded_move(
     game.move_count += 1
     game.last_move_json = {
         "symbol": symbol,
+        "value": value,
         "board_row": board_row,
         "board_col": board_col,
         "cell_row": cell_row,
@@ -137,6 +139,7 @@ def _apply_recorded_move(
             board_col=board_col,
             cell_row=cell_row,
             cell_col=cell_col,
+            value=value,
             move_index=game.move_count,
         )
     )
@@ -156,7 +159,15 @@ def _execute_bot_turn_if_needed(db: Session, game: UltimateTicTacToeGame) -> Non
         return
 
     chosen_move = random.choice(valid_moves)
-    _apply_recorded_move(db, game, game.bot_symbol, None, chosen_move)
+    board_row, board_col, _, _ = chosen_move
+    values = legal_values_for_subgrid(game.board_state, board_row, board_col)
+    if not values:
+        game.status = "finished"
+        game.winner = "D"
+        game.finished_at = datetime.utcnow()
+        return
+    chosen_value = random.choice(values)
+    _apply_recorded_move(db, game, game.bot_symbol, None, chosen_move, chosen_value)
 
 
 def _generate_invite_code() -> str:
@@ -407,7 +418,11 @@ def make_move(game_id: str, payload: MoveCreate, db: Session = Depends(get_db), 
     if candidate_move not in valid_moves:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Illegal move for current board state")
 
-    _apply_recorded_move(db, game, symbol, current_user.id, candidate_move)
+    valid_values = legal_values_for_subgrid(game.board_state, payload.board_row, payload.board_col)
+    if payload.value not in valid_values:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Value already used in this subgrid")
+
+    _apply_recorded_move(db, game, symbol, current_user.id, candidate_move, payload.value)
     _execute_bot_turn_if_needed(db, game)
 
     db.add(game)

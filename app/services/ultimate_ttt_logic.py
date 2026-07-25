@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+CellValue = int | None
 Symbol = str | None
 Move = tuple[int, int, int, int]
 
 
-def initial_board_state() -> list[list[list[list[Symbol]]]]:
+def initial_board_state() -> list[list[list[list[CellValue]]]]:
     return [[[[None for _ in range(3)] for _ in range(3)] for _ in range(3)] for _ in range(3)]
 
 
@@ -30,8 +31,30 @@ def _is_grid_full(grid: list[list[Symbol]]) -> bool:
     return all(cell is not None for row in grid for cell in row)
 
 
+def _sum_line_winner(subgrid: list[list[CellValue]]) -> bool:
+    for row in range(3):
+        line = [subgrid[row][0], subgrid[row][1], subgrid[row][2]]
+        if None not in line and sum(line) == 15:
+            return True
+
+    for col in range(3):
+        line = [subgrid[0][col], subgrid[1][col], subgrid[2][col]]
+        if None not in line and sum(line) == 15:
+            return True
+
+    diag_a = [subgrid[0][0], subgrid[1][1], subgrid[2][2]]
+    if None not in diag_a and sum(diag_a) == 15:
+        return True
+
+    diag_b = [subgrid[0][2], subgrid[1][1], subgrid[2][0]]
+    if None not in diag_b and sum(diag_b) == 15:
+        return True
+
+    return False
+
+
 def _is_subgrid_open(
-    board_state: list[list[list[list[Symbol]]]],
+    board_state: list[list[list[list[CellValue]]]],
     subgrid_state: list[list[Symbol]],
     board_row: int,
     board_col: int,
@@ -42,7 +65,7 @@ def _is_subgrid_open(
 
 
 def legal_moves(
-    board_state: list[list[list[list[Symbol]]]],
+    board_state: list[list[list[list[CellValue]]]],
     subgrid_state: list[list[Symbol]],
     next_board_row: int | None,
     next_board_col: int | None,
@@ -68,16 +91,30 @@ def legal_moves(
     return moves
 
 
+def legal_values_for_subgrid(
+    board_state: list[list[list[list[CellValue]]]],
+    board_row: int,
+    board_col: int,
+) -> list[int]:
+    used_values: set[int] = set()
+    subgrid = board_state[board_row][board_col]
+    for row in subgrid:
+        for value in row:
+            if value is not None:
+                used_values.add(int(value))
+    return [value for value in range(1, 10) if value not in used_values]
+
+
 def _compute_subgrid_status(
-    board_state: list[list[list[list[Symbol]]]],
+    board_state: list[list[list[list[CellValue]]]],
     subgrid_state: list[list[Symbol]],
     board_row: int,
     board_col: int,
+    symbol: str,
 ) -> None:
     subgrid = board_state[board_row][board_col]
-    winner = _winner_of_grid(subgrid)
-    if winner:
-        subgrid_state[board_row][board_col] = winner
+    if _sum_line_winner(subgrid):
+        subgrid_state[board_row][board_col] = symbol
     elif _is_grid_full(subgrid):
         subgrid_state[board_row][board_col] = "D"
 
@@ -88,17 +125,24 @@ def _compute_match_winner(subgrid_state: list[list[Symbol]]) -> Symbol:
 
 
 def apply_move(
-    board_state: list[list[list[list[Symbol]]]],
+    board_state: list[list[list[list[CellValue]]]],
     subgrid_state: list[list[Symbol]],
     move: Move,
     symbol: str,
+    value: int,
 ) -> dict:
     board_row, board_col, cell_row, cell_col = move
     next_board = deepcopy(board_state)
     next_subgrid = deepcopy(subgrid_state)
 
-    next_board[board_row][board_col][cell_row][cell_col] = symbol
-    _compute_subgrid_status(next_board, next_subgrid, board_row, board_col)
+    if next_board[board_row][board_col][cell_row][cell_col] is not None:
+        raise ValueError("Cell is already occupied")
+
+    if value not in legal_values_for_subgrid(next_board, board_row, board_col):
+        raise ValueError("Value already used in this subgrid")
+
+    next_board[board_row][board_col][cell_row][cell_col] = int(value)
+    _compute_subgrid_status(next_board, next_subgrid, board_row, board_col, symbol)
 
     winner = _compute_match_winner(next_subgrid)
     if winner:

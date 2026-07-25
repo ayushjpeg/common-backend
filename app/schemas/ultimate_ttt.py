@@ -40,6 +40,7 @@ class MoveCreate(BaseModel):
     board_col: int = Field(ge=0, le=2)
     cell_row: int = Field(ge=0, le=2)
     cell_col: int = Field(ge=0, le=2)
+    value: int = Field(ge=1, le=9)
 
 
 class MoveRead(BaseModel):
@@ -51,6 +52,7 @@ class MoveRead(BaseModel):
     board_col: int
     cell_row: int
     cell_col: int
+    value: int
     move_index: int
     created_at: datetime
 
@@ -98,6 +100,7 @@ class GameRead(BaseModel):
     player_x: PlayerMini | None = None
     player_o: PlayerMini | None = None
     legal_moves: list[GamePoint] = Field(default_factory=list)
+    number_range: list[int] = Field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 7, 8, 9])
 
 
 class PresenceAck(BaseModel):
