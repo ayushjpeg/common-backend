@@ -4,6 +4,7 @@ from pathlib import Path
 import logging
 import os
 import random
+import re
 import threading
 import tempfile
 
@@ -13,13 +14,48 @@ logger = logging.getLogger(__name__)
 
 ACTION_SPACE_SIZE = 9 * 9 * 9
 _MODEL_LOCK = threading.Lock()
-_POLICY_MODEL = None
-_LOAD_ATTEMPTED = False
+_POLICY_MODELS: dict[str, object | None] = {}
+_LOAD_ATTEMPTED: set[str] = set()
+
+DEFAULT_MODEL_VERSION = "v1"
+
+
+def _models_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "model_artifacts" / "ultimate_ttt"
+
+
+def _normalize_model_version(model_version: str | None) -> str:
+    version = (model_version or "").strip() or DEFAULT_MODEL_VERSION
+    if re.fullmatch(r"[A-Za-z0-9_.-]+", version) is None:
+        return DEFAULT_MODEL_VERSION
+    return version
+
+
+def list_available_model_versions() -> list[str]:
+    model_dir = _models_dir()
+    if not model_dir.exists():
+        return [DEFAULT_MODEL_VERSION]
+
+    versions = [path.stem for path in model_dir.glob("*.pt") if path.is_file()]
+    if not versions:
+        return [DEFAULT_MODEL_VERSION]
+
+    def _sort_key(value: str) -> tuple[int, int | str]:
+        match = re.fullmatch(r"v(\d+)", value.lower())
+        if match:
+            return (0, int(match.group(1)))
+        return (1, value)
+
+    return sorted(set(versions), key=_sort_key)
 
 
 def _default_model_path() -> Path:
-    # Inside common-backend app package: /app/app/model_artifacts/ultimate_ttt/latest.pt
-    return Path(__file__).resolve().parents[1] / "model_artifacts" / "ultimate_ttt" / "latest.pt"
+    # Inside common-backend app package: /app/app/model_artifacts/ultimate_ttt/v1.pt
+    return _models_dir() / f"{DEFAULT_MODEL_VERSION}.pt"
+
+
+def _model_path_for_version(model_version: str) -> Path:
+    return _models_dir() / f"{model_version}.pt"
 
 
 def _legacy_dev_model_path() -> Path:
@@ -51,20 +87,29 @@ def _download_model_if_needed(target_path: Path) -> None:
         logger.warning("Failed downloading model from UTTT_MODEL_URL (%s)", exc)
 
 
-def _resolve_model_path() -> Path:
+def _resolve_model_path(model_version: str | None = None) -> Path:
     explicit = os.getenv("UTTT_MODEL_PATH", "").strip()
     if explicit:
         return Path(explicit)
+
+    normalized = _normalize_model_version(model_version)
+    version_path = _model_path_for_version(normalized)
+    if version_path.exists():
+        return version_path
 
     container_default = _default_model_path()
     if container_default.exists():
         return container_default
 
+    latest_path = _models_dir() / "latest.pt"
+    if latest_path.exists():
+        return latest_path
+
     legacy = _legacy_dev_model_path()
     if legacy.exists():
         return legacy
 
-    return container_default
+    return version_path
 
 
 def _action_to_index(board_row: int, board_col: int, cell_row: int, cell_col: int, value: int) -> int:
@@ -131,8 +176,8 @@ def _build_policy_net(input_dim: int, hidden_dim: int, hidden_layers: int):
     return _PolicyNet()
 
 
-def _load_policy_model():
-    model_path = _resolve_model_path()
+def _load_policy_model(model_version: str | None = None):
+    model_path = _resolve_model_path(model_version)
     _download_model_if_needed(model_path)
 
     if not model_path.exists():
@@ -164,16 +209,16 @@ def _load_policy_model():
         return None
 
 
-def _get_policy_model():
-    global _POLICY_MODEL, _LOAD_ATTEMPTED
-    if _LOAD_ATTEMPTED:
-        return _POLICY_MODEL
+def _get_policy_model(model_version: str | None = None):
+    normalized = _normalize_model_version(model_version)
+    if normalized in _LOAD_ATTEMPTED:
+        return _POLICY_MODELS.get(normalized)
 
     with _MODEL_LOCK:
-        if not _LOAD_ATTEMPTED:
-            _POLICY_MODEL = _load_policy_model()
-            _LOAD_ATTEMPTED = True
-    return _POLICY_MODEL
+        if normalized not in _LOAD_ATTEMPTED:
+            _POLICY_MODELS[normalized] = _load_policy_model(normalized)
+            _LOAD_ATTEMPTED.add(normalized)
+    return _POLICY_MODELS.get(normalized)
 
 
 def choose_bot_move(
@@ -182,6 +227,7 @@ def choose_bot_move(
     current_player: str,
     next_board_row: int | None,
     next_board_col: int | None,
+    model_version: str | None = None,
 ) -> tuple[tuple[int, int, int, int], int, str] | None:
     legal_cells = legal_moves(board_state, subgrid_state, next_board_row, next_board_col)
     if not legal_cells:
@@ -197,7 +243,7 @@ def choose_bot_move(
     if not options:
         return None
 
-    model = _get_policy_model()
+    model = _get_policy_model(model_version)
     if model is None:
         move, value, _ = random.choice(options)
         return move, value, "random_fallback"

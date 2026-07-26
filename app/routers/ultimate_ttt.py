@@ -14,7 +14,7 @@ from ..models.ultimate_ttt import UltimateTicTacToeGame, UltimateTicTacToeInvite
 from ..models.user import User
 from ..schemas.ultimate_ttt import ActivePlayerRead, GameCreateBot, GamePoint, GameRead, InviteCreate, InviteRead, MoveCreate, PresenceAck
 from ..services.ultimate_ttt_logic import apply_move, initial_board_state, initial_subgrid_state, legal_moves, legal_values_for_subgrid
-from ..services.ultimate_ttt_model import choose_bot_move
+from ..services.ultimate_ttt_model import DEFAULT_MODEL_VERSION, choose_bot_move, list_available_model_versions
 
 router = APIRouter(prefix="/ultimate-ttt", tags=["ultimate-ttt"], dependencies=[Depends(require_api_key)])
 
@@ -74,6 +74,7 @@ def _serialize_game(db: Session, game: UltimateTicTacToeGame, current_user_id: s
         current_player=game.current_player,
         you_symbol=_get_player_symbol(game, current_user_id),
         bot_symbol=game.bot_symbol,
+        bot_model_version=game.bot_model_version,
         next_board_row=game.next_board_row,
         next_board_col=game.next_board_col,
         board_state=game.board_state,
@@ -88,6 +89,7 @@ def _serialize_game(db: Session, game: UltimateTicTacToeGame, current_user_id: s
             GamePoint(board_row=board_row, board_col=board_col, cell_row=cell_row, cell_col=cell_col)
             for board_row, board_col, cell_row, cell_col in moves
         ],
+        bot_available_models=list_available_model_versions(),
     )
 
 
@@ -167,6 +169,7 @@ def _execute_bot_turn_if_needed(db: Session, game: UltimateTicTacToeGame) -> Non
         current_player=game.current_player,
         next_board_row=game.next_board_row,
         next_board_col=game.next_board_col,
+        model_version=game.bot_model_version,
     )
     if chosen is None:
         game.status = "finished"
@@ -348,8 +351,17 @@ def cancel_invite(invite_id: str, db: Session = Depends(get_db), current_user: U
     db.commit()
 
 
+@router.get("/models", response_model=list[str])
+def list_bot_models():
+    return list_available_model_versions()
+
+
 @router.post("/games/bot", response_model=GameRead, status_code=status.HTTP_201_CREATED)
 def create_bot_game(payload: GameCreateBot, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    available_models = list_available_model_versions()
+    requested_model = (payload.model_version or DEFAULT_MODEL_VERSION).strip()
+    selected_model = requested_model if requested_model in available_models else DEFAULT_MODEL_VERSION
+
     if payload.human_symbol == "X":
         player_x_user_id = current_user.id
         player_o_user_id = None
@@ -366,6 +378,7 @@ def create_bot_game(payload: GameCreateBot, db: Session = Depends(get_db), curre
         mode="bot",
         status="active",
         bot_symbol=bot_symbol,
+        bot_model_version=selected_model,
         current_player="X",
         board_state=initial_board_state(),
         subgrid_state=initial_subgrid_state(),

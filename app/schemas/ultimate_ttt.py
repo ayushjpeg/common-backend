@@ -33,6 +33,7 @@ class InviteCreate(BaseModel):
 
 class GameCreateBot(BaseModel):
     human_symbol: Literal["X", "O"] = "X"
+    model_version: str = "v1"
 
 
 class MoveCreate(BaseModel):
@@ -89,6 +90,7 @@ class GameRead(BaseModel):
     current_player: Literal["X", "O"]
     you_symbol: Literal["X", "O"] | None = None
     bot_symbol: Literal["X", "O"] | None = None
+    bot_model_version: str | None = None
     next_board_row: int | None = None
     next_board_col: int | None = None
     board_state: list
@@ -101,6 +103,7 @@ class GameRead(BaseModel):
     player_o: PlayerMini | None = None
     legal_moves: list[GamePoint] = Field(default_factory=list)
     number_range: list[int] = Field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 7, 8, 9])
+    bot_available_models: list[str] = Field(default_factory=list)
 
 
 class PresenceAck(BaseModel):

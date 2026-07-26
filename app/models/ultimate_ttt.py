@@ -22,6 +22,7 @@ class UltimateTicTacToeGame(Base):
     player_x_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     player_o_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     bot_symbol = Column(String(1), nullable=True)
+    bot_model_version = Column(String(32), nullable=True, default="v1")
     mode = Column(String(16), nullable=False, default="human")
     status = Column(String(16), nullable=False, default="active")
     winner = Column(String(8), nullable=True)
