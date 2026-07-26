@@ -196,6 +196,11 @@ cython_debug/
 
 # Local NumberTTT model artifacts (loaded at runtime)
 app/model_artifacts/
+!app/model_artifacts/
+app/model_artifacts/*
+!app/model_artifacts/ultimate_ttt/
+app/model_artifacts/ultimate_ttt/*
+!app/model_artifacts/ultimate_ttt/latest.pt
 
 # Cursor
 #  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
