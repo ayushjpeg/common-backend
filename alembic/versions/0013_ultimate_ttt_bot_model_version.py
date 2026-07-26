@@ -1,7 +1,7 @@
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0013_ultimate_ttt_bot_model_version"
+revision = "0013_utt_bot_model_version"
 down_revision = "0012_ultimate_ttt_move_value"
 branch_labels = None
 depends_on = None
