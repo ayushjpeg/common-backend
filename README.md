@@ -112,6 +112,23 @@ Production GitHub secrets needed by `.github/workflows/deploy.yml`:
 
 Uploads are saved under `APP_MEDIA_ROOT` (defaults to `backend/storage`). Each owner type (food, cctv, etc.) gets its own subfolder. In production, point `APP_MEDIA_ROOT` to a persistent path mounted from your Linux server or swap the implementation for S3/MinIO.
 
+## SuperTTT Bot Model Deployment
+
+The Ultimate/NumberTTT bot can use a trained policy checkpoint (`latest.pt`) at runtime.
+
+Recommended production options:
+
+- `UTTT_MODEL_PATH`: absolute path to a model file inside the container (for example `/app/app/model_artifacts/ultimate_ttt/latest.pt`).
+- `UTTT_MODEL_URL`: HTTPS URL to download the model on first load if the local file is missing.
+
+Resolution order used by backend:
+
+1. `UTTT_MODEL_PATH` (if set)
+2. Local default: `/app/app/model_artifacts/ultimate_ttt/latest.pt`
+3. Dev fallback path: `../NumberTTT-Training/artifacts/latest.pt`
+
+If no model is found or load fails, bot safely falls back to random legal moves.
+
 ## Nightly database backup to Google Drive
 
 If you want the backup workflow to live entirely inside this project and use GitHub secrets instead of a local env file, use:

@@ -5,6 +5,7 @@ import logging
 import os
 import random
 import threading
+import tempfile
 
 from .ultimate_ttt_logic import legal_moves, legal_values_for_subgrid
 
@@ -17,7 +18,53 @@ _LOAD_ATTEMPTED = False
 
 
 def _default_model_path() -> Path:
+    # Inside common-backend app package: /app/app/model_artifacts/ultimate_ttt/latest.pt
+    return Path(__file__).resolve().parents[1] / "model_artifacts" / "ultimate_ttt" / "latest.pt"
+
+
+def _legacy_dev_model_path() -> Path:
     return Path(__file__).resolve().parents[3] / "NumberTTT-Training" / "artifacts" / "latest.pt"
+
+
+def _download_model_if_needed(target_path: Path) -> None:
+    model_url = os.getenv("UTTT_MODEL_URL", "").strip()
+    if not model_url:
+        return
+    if target_path.exists():
+        return
+
+    try:
+        import requests
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with requests.get(model_url, timeout=60, stream=True) as response:
+            response.raise_for_status()
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as tmp:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        tmp.write(chunk)
+                temp_path = Path(tmp.name)
+
+        temp_path.replace(target_path)
+        logger.info("Downloaded Ultimate TTT model from UTTT_MODEL_URL to %s", target_path)
+    except Exception as exc:  # pragma: no cover - runtime network resilience
+        logger.warning("Failed downloading model from UTTT_MODEL_URL (%s)", exc)
+
+
+def _resolve_model_path() -> Path:
+    explicit = os.getenv("UTTT_MODEL_PATH", "").strip()
+    if explicit:
+        return Path(explicit)
+
+    container_default = _default_model_path()
+    if container_default.exists():
+        return container_default
+
+    legacy = _legacy_dev_model_path()
+    if legacy.exists():
+        return legacy
+
+    return container_default
 
 
 def _action_to_index(board_row: int, board_col: int, cell_row: int, cell_col: int, value: int) -> int:
@@ -85,9 +132,14 @@ def _build_policy_net(input_dim: int, hidden_dim: int, hidden_layers: int):
 
 
 def _load_policy_model():
-    model_path = Path(os.getenv("UTTT_MODEL_PATH", str(_default_model_path())))
+    model_path = _resolve_model_path()
+    _download_model_if_needed(model_path)
+
     if not model_path.exists():
-        logger.warning("Ultimate TTT model not found at %s; bot will use random fallback", model_path)
+        logger.warning(
+            "Ultimate TTT model not found at %s; set UTTT_MODEL_PATH or UTTT_MODEL_URL; bot will use random fallback",
+            model_path,
+        )
         return None
 
     try:

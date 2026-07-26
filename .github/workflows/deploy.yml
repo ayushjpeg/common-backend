@@ -37,6 +37,8 @@ jobs:
           APP_GOOGLE_CLIENT_ID='${{ secrets.APP_GOOGLE_CLIENT_ID }}'
           APP_GOOGLE_CLIENT_SECRET='${{ secrets.APP_GOOGLE_CLIENT_SECRET }}'
           APP_AUTH_COOKIE_DOMAIN='${{ secrets.APP_AUTH_COOKIE_DOMAIN }}'
+          UTTT_MODEL_PATH='${{ secrets.UTTT_MODEL_PATH }}'
+          UTTT_MODEL_URL='${{ secrets.UTTT_MODEL_URL }}'
           TZ='Asia/Kolkata'
           : "${APP_MEDIA_ROOT:=/srv/common-backend/media}"
           : "${APP_PUBLIC_BASE_URL:=https://common-backend.ayux.in}"
@@ -52,6 +54,8 @@ jobs:
             -e APP_GOOGLE_CLIENT_ID="$APP_GOOGLE_CLIENT_ID" \
             -e APP_GOOGLE_CLIENT_SECRET="$APP_GOOGLE_CLIENT_SECRET" \
             -e APP_AUTH_COOKIE_DOMAIN="$APP_AUTH_COOKIE_DOMAIN" \
+            -e UTTT_MODEL_PATH="$UTTT_MODEL_PATH" \
+            -e UTTT_MODEL_URL="$UTTT_MODEL_URL" \
             -e TZ="$TZ" \
             -v "$APP_MEDIA_ROOT":"$APP_MEDIA_ROOT" \
             common-backend:latest
