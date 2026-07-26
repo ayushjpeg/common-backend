@@ -182,7 +182,7 @@ def choose_bot_move(
     current_player: str,
     next_board_row: int | None,
     next_board_col: int | None,
-) -> tuple[tuple[int, int, int, int], int] | None:
+) -> tuple[tuple[int, int, int, int], int, str] | None:
     legal_cells = legal_moves(board_state, subgrid_state, next_board_row, next_board_col)
     if not legal_cells:
         return None
@@ -200,7 +200,7 @@ def choose_bot_move(
     model = _get_policy_model()
     if model is None:
         move, value, _ = random.choice(options)
-        return move, value
+        return move, value, "random_fallback"
 
     try:
         import torch
@@ -215,8 +215,8 @@ def choose_bot_move(
         option_logits = logits[indices]
         best_option_idx = int(torch.argmax(option_logits).item())
         move, value, _ = options[best_option_idx]
-        return move, value
+        return move, value, "model"
     except Exception as exc:  # pragma: no cover - runtime resilience
         logger.warning("Model inference failed (%s); using random fallback", exc)
         move, value, _ = random.choice(options)
-        return move, value
+        return move, value, "random_fallback"

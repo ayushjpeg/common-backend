@@ -106,6 +106,7 @@ def _apply_recorded_move(
     user_id: str | None,
     move: tuple[int, int, int, int],
     value: int,
+    move_source: str | None = None,
 ) -> None:
     result = apply_move(game.board_state, game.subgrid_state, move, symbol, value)
     board_row, board_col, cell_row, cell_col = move
@@ -122,6 +123,7 @@ def _apply_recorded_move(
         "board_col": board_col,
         "cell_row": cell_row,
         "cell_col": cell_col,
+        "source": move_source or ("human" if user_id else None),
     }
 
     if result["is_finished"]:
@@ -172,8 +174,8 @@ def _execute_bot_turn_if_needed(db: Session, game: UltimateTicTacToeGame) -> Non
         game.finished_at = datetime.utcnow()
         return
 
-    chosen_move, chosen_value = chosen
-    _apply_recorded_move(db, game, game.bot_symbol, None, chosen_move, chosen_value)
+    chosen_move, chosen_value, chosen_source = chosen
+    _apply_recorded_move(db, game, game.bot_symbol, None, chosen_move, chosen_value, move_source=chosen_source)
 
 
 def _generate_invite_code() -> str:
