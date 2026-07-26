@@ -14,6 +14,7 @@ from ..models.ultimate_ttt import UltimateTicTacToeGame, UltimateTicTacToeInvite
 from ..models.user import User
 from ..schemas.ultimate_ttt import ActivePlayerRead, GameCreateBot, GamePoint, GameRead, InviteCreate, InviteRead, MoveCreate, PresenceAck
 from ..services.ultimate_ttt_logic import apply_move, initial_board_state, initial_subgrid_state, legal_moves, legal_values_for_subgrid
+from ..services.ultimate_ttt_model import choose_bot_move
 
 router = APIRouter(prefix="/ultimate-ttt", tags=["ultimate-ttt"], dependencies=[Depends(require_api_key)])
 
@@ -158,15 +159,20 @@ def _execute_bot_turn_if_needed(db: Session, game: UltimateTicTacToeGame) -> Non
         game.finished_at = datetime.utcnow()
         return
 
-    chosen_move = random.choice(valid_moves)
-    board_row, board_col, _, _ = chosen_move
-    values = legal_values_for_subgrid(game.board_state, board_row, board_col)
-    if not values:
+    chosen = choose_bot_move(
+        board_state=game.board_state,
+        subgrid_state=game.subgrid_state,
+        current_player=game.current_player,
+        next_board_row=game.next_board_row,
+        next_board_col=game.next_board_col,
+    )
+    if chosen is None:
         game.status = "finished"
         game.winner = "D"
         game.finished_at = datetime.utcnow()
         return
-    chosen_value = random.choice(values)
+
+    chosen_move, chosen_value = chosen
     _apply_recorded_move(db, game, game.bot_symbol, None, chosen_move, chosen_value)
 
 
